@@ -31,9 +31,17 @@ class IOMeta(type):
 
     def __init__(cls, name, bases, attrs):
         super().__init__(name, bases, attrs)
-        if hasattr(cls, "suffixes"):
-            for suffix in cls.suffixes:
-                if suffix in cls._registry:
-                    existing = cls._registry[suffix].__name__
-                    raise ValueError(f".{suffix} is already registered by {existing}")
-                IOMeta._registry[suffix] = cls
+        if isinstance(cls, IOProtocol):
+            if hasattr(cls, "suffixes"):
+                for suffix in cls.suffixes:
+                    if suffix in IOMeta._registry:
+                        existing = IOMeta._registry[suffix].__name__
+                        raise ValueError(f".{suffix} is already registered by {existing}")
+                    IOMeta._registry[suffix] = cls
+
+
+class BaseIO(metaclass=IOMeta):
+    suffixes: List[str] = []
+    pass
+
+
