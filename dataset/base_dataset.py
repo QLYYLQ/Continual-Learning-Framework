@@ -9,6 +9,7 @@ from torch.utils.data import Dataset
 from random import shuffle
 from utils.ImageList import ImageList
 
+
 class BaseSplit(Dataset):
     def __init__(self,
                  root: str,
@@ -79,7 +80,6 @@ class BaseSplit(Dataset):
     def resize_image_aspect_ratio(self, img: Image, label: bool = True) -> Image:
         # 原始图片尺寸
         # wd
-        min_size = (self.image_size[0], self.image_size[0])
         max_size = (self.image_size[1], self.image_size[0])
         original_width, original_height = img.size
 
@@ -237,6 +237,7 @@ class BaseIncrement(Dataset):
                  data_masking: str = "current",
                  no_memory: bool = True,
                  mask_value: int = 0):
+        self.class_name = None
         self.no_memory = no_memory
         if not self.no_memory:
             raise NotImplementedError("not implemented")
@@ -343,3 +344,9 @@ class BaseEvaluate(BaseIncrement):
         if "split_config" in kwargs.keys():
             kwargs["split_config"]["train"] = False
         super().__init__(**kwargs)
+
+# for new branch, improve this file
+
+class BaseDataset(Dataset,ABC):
+    pass
+
