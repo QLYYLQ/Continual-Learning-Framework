@@ -1,7 +1,6 @@
 from typing import List, Protocol, runtime_checkable, Union
 from abc import ABC, abstractmethod
 from os import PathLike
-import torch
 
 
 class LoadProtocol(Protocol):
@@ -31,17 +30,26 @@ class IOMeta(type):
 
     def __init__(cls, name, bases, attrs):
         super().__init__(name, bases, attrs)
-        if isinstance(cls, IOProtocol):
+        if issubclass(cls, IOProtocol):
             if hasattr(cls, "suffixes"):
                 for suffix in cls.suffixes:
                     if suffix in IOMeta._registry:
                         existing = IOMeta._registry[suffix].__name__
                         raise ValueError(f".{suffix} is already registered by {existing}")
                     IOMeta._registry[suffix] = cls
+        else:
+            raise ValueError(f"Unsupported IO class {cls}")
 
 
-class BaseIO(metaclass=IOMeta):
+class BaseIO(metaclass=IOMeta, ABC):
     suffixes: List[str] = []
-    pass
+
+    @abstractmethod
+    def load(self, file_name: Union[str, PathLike[str]]) -> List[List[int]]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def write(self, file_name: Union[str, PathLike[str]]) -> None:
+        raise NotImplementedError
 
 
