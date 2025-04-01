@@ -34,15 +34,20 @@ class _DataReplay(Protocol):
 
 
 @runtime_checkable
-class OnlineReplayStrategy(_ReplayStrategy):
+class OnlineReplayStrategy(_ReplayStrategy, Protocol):
+    base_url: str = None
     api_key: str = None
 
+    def request_with_message(self, message):
+        pass
+
 
 @runtime_checkable
-class LocalReplayStrategy(_ReplayStrategy):
+class LocalReplayStrategy(_ReplayStrategy, Protocol):
     pass
 
 
 @runtime_checkable
-class GenericReplayStrategy(_ReplayStrategy):
-    pass
+class GenericReplayStrategy(_ReplayStrategy, Protocol):
+    def generic_with_gan(self, gan_model) -> Any:
+        pass
