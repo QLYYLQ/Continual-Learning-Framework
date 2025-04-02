@@ -1,11 +1,12 @@
-from typing import List, Protocol, runtime_checkable, Union
+from typing import List, Protocol, runtime_checkable, Union, Any
 from abc import ABC, abstractmethod
 from os import PathLike
 
 
+
 class LoadProtocol(Protocol):
 
-    def load(self, file_name: Union[str, PathLike[str]]) -> List[List[int]]:
+    def load(self, file_name: Union[str, PathLike[str]]) -> Any:
         ...
 
 
@@ -22,11 +23,25 @@ class IOProtocol(LoadProtocol, WriteProtocol, Protocol):
     pass
 
 
+def registry():
+    return IOMeta._registry
+
+
 class IOMeta(type):
     """
     auto registry the IO class
     """
     _registry = {}
+    @property
+    def registry(cls):
+        return IOMeta._registry
+    @registry.setter
+    def registry(cls, value):
+        raise TypeError("you can't change the registry dict of the IO class")
+
+    @registry.deleter
+    def registry(cls):
+        raise TypeError("you can't change the registry dict of the IO class")
 
     def __init__(cls, name, bases, attrs):
         super().__init__(name, bases, attrs)
@@ -41,8 +56,16 @@ class IOMeta(type):
             raise ValueError(f"Unsupported IO class {cls}")
 
 
-class BaseIO(metaclass=IOMeta, ABC):
-    suffixes: List[str] = []
+
+class BaseIO(metaclass=IOMeta):
+    """
+    You must add all possible suffixes to the list, and files with these suffixes should be able to be read and written
+    by the methods you set
+    """
+    # should not use suffixes = [] with @dataclass() decorator, which create a shared list for all subclasses
+    # function field() tell @dataclass() to create an attribute using list function for every subclass
+
+    suffixes: List[str] = ["test"]
 
     @abstractmethod
     def load(self, file_name: Union[str, PathLike[str]]) -> List[List[int]]:
@@ -52,4 +75,5 @@ class BaseIO(metaclass=IOMeta, ABC):
     def write(self, file_name: Union[str, PathLike[str]]) -> None:
         raise NotImplementedError
 
-
+if __name__ == "__main__":
+    print(issubclass(BaseIO, IOProtocol))
