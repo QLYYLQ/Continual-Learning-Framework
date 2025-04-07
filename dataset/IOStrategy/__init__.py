@@ -1,2 +1,2 @@
 from .IOProtocol import IOProtocol, BaseIO, IOMeta
-IORegister = IOMeta.registry
+IORegister = BaseIO.registry
