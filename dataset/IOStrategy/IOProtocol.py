@@ -1,18 +1,36 @@
-from typing import List, Protocol, runtime_checkable, Union, Any, Dict, Iterable, Optional, TypedDict, TypeVar, Type
 from os import PathLike
+from typing import Protocol, runtime_checkable, Union, Any, Dict, Iterable, Optional, TypedDict, Type, Callable
 from weakref import WeakSet
 
-
 class _T_ModalityRegistry(TypedDict):
-    BaseIO: Type[Any]
-    base_suffixes: List[str]
-    Custom: Dict[str, Type[Any]]
-
-
+    BaseIO: WeakSet[Any]
+    base_suffixes: Iterable[str]
+    Custom: Dict[str, WeakSet[Any]]
 
 _T_Registry = Dict[str, _T_ModalityRegistry]
 
+
 _Registry: _T_Registry = dict()
+
+class _T_IOMeta(Protocol):
+    _io_invalidation_counter: int
+    _io_cache: WeakSet
+    _io_negative_cache: WeakSet
+    _io_registry: WeakSet
+    _meta_register: Callable[[Type[Any], bool, _T_ModalityRegistry, Iterable[str]], None]
+    is_base: bool
+    modality: str
+    register: Callable[[Type[Any], Optional[Iterable[str]]], Type[Any]]
+    __subclasshook__: Callable[[Any], bool]  # type: ignore
+    __instancecheck__: Callable[[Any], bool]
+
+    @property
+    def io_invalidation_counter(self):
+        return self._io_invalidation_counter
+
+
+_IORegistry: Dict[str, Union[type, _T_IOMeta]] = dict()
+
 
 class LoadProtocol(Protocol):
 
@@ -69,7 +87,7 @@ class IOMeta(type):
         cls._io_cache = WeakSet()
         cls._io_negative_cache = WeakSet()
         # version controller
-        cls._io_invalidation_cache_version = IOMeta._io_invalidation_counter
+        cls._io_invalidation_cache_version = _IORegistry[modality]._io_invalidation_counter
         return cls
 
     def register(cls, subclass, suffixes: Optional[Iterable[str]] = None):
@@ -103,7 +121,7 @@ class IOMeta(type):
         cls._io_registry.add(subclass)  # type: ignore
         # when you manually register class, that won't be base class
         cls._meta_register(subclass, False, _Registry[cls.modality], suffixes)  # type: ignore
-        IOMeta._io_invalidation_counter += 1
+        _IORegistry[cls.modality]._io_invalidation_counter += 1 # type: ignore
         return subclass
 
     def __subclasscheck__(self, subclass):
@@ -113,13 +131,14 @@ class IOMeta(type):
         两个常量值不匹配，更新self._io_negative_cache），随后检查 subclass hook和self.__mro__，都没查到就添加到
         self._io_negative_cache
         """
+        _Meta = _IORegistry[self.modality]
         if not isinstance(subclass, type):
             raise TypeError("arg 1 must be a class")
         if subclass in self._io_cache:
             return True
-        if self._io_invalidation_cache_version < IOMeta._io_invalidation_counter:
+        if self._io_invalidation_cache_version < _Meta._io_invalidation_counter:
             self._io_negative_cache = WeakSet()
-            self._io_invalidation_cache_version = IOMeta._io_invalidation_counter
+            self._io_invalidation_cache_version = _Meta._io_invalidation_counter
         elif subclass in self._io_negative_cache:
             return False
         # Check the subclass hook
@@ -146,21 +165,40 @@ class IOMeta(type):
         self._io_negative_cache.add(subclass)
         return False
 
+    def __instancecheck__(self, instance):
+        """
+        rewrite isinstance(instance, self)
+        """
+        _Meta = _IORegistry[self.modality]
+        subclass = instance.__class__
+        # using cache for quick check
+        if subclass in self._io_cache:
+            return True
+        subtype = type(instance)
+        if subtype in subclass:
+            # when negative_cache is the newest version
+            if self._io_invalidation_cache_version == _Meta._io_invalidation_counter and subtype in self._io_negative_cache:
+                return False
+            return self.__subclasscheck__(subtype)
+        return any(self.__subclasscheck__(c) for c in (subclass, subtype))
+
+
     @staticmethod
-    def _meta_register(cls, is_base, registry: dict, suffixes_list: Iterable[str], ):
+    def _meta_register(cls, is_base, registry: _T_ModalityRegistry, suffixes_list: Iterable[str], ):
         """
         auto registry
         """
         if is_base:
-            registry['base_suffixes'] = suffixes_list
-            registry["BaseIO"] = cls
+            registry["base_suffixes"] = suffixes_list
+            registry["BaseIO"] = WeakSet([cls])
+            registry["Custom"] = dict()
         else:
             for suffix in suffixes_list:
                 if suffix not in registry.keys():
-                    registry[suffix] = cls
+                    registry["Custom"][suffix] = WeakSet([cls])
                 else:
                     # TODO: 这里需要添如果覆盖之前注册过的类以后的行为
-                    registry[suffix] = cls
+                    registry["Custom"][suffix] = WeakSet([cls])
 
 
 def create_io_registry(modality: str, is_base: bool = True, cls_name: Optional[str] = None) -> type:
@@ -173,6 +211,7 @@ def create_io_registry(modality: str, is_base: bool = True, cls_name: Optional[s
         "__qualname__": cls_name,
     }
     new_meta = type(cls_name, (IOMeta,), attrs)
+    _IORegistry[modality] = new_meta
     return new_meta
 
 
@@ -186,6 +225,10 @@ def _check_suffixes(suffixes: Iterable[str]) -> set:
         else:
             return_suffixes.append(suffix)
     return set(return_suffixes)
+
+
+ImageIOMeta = create_io_registry("Image")
+TextIOMeta = create_io_registry("Text")
 
 
 if __name__ == "__main__":
@@ -261,7 +304,7 @@ if __name__ == "__main__":
     # BaseIO.register(TryClass1)
     BaseIO.register(TryClass2)  # type: ignore
     # print(issubclass(TryClass3, IOProtocol))
-    BaseIO.register(TryClass4)  # type: ignore
+    # BaseIO.register(TryClass4)  # type: ignore
     print(_Registry)
     # BaseIO.register(BaseIO2)
     # BaseIO.register(TryClass3)
