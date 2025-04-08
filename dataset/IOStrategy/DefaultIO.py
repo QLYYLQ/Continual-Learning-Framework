@@ -1,20 +1,45 @@
-# import numpy as np
-# from PIL import Image
-# from typing import Union
-# from os import PathLike
-# from dataset.IOStrategy.IOProtocol import BaseIO
-import abc
-
-# class ImageIO(BaseIO):
-#     suffixes = ['png', 'jpg', 'jpeg']
-#
-#     def load(self, path: Union[str, PathLike]) -> np.ndarray:
-#         image = Image.open(path)
-#         return np.array(image)
-#
-#     def write(self, file_name: Union[str, PathLike[str]]) -> np.ndarray:
-#         return np.array(Image.open(file_name))
+from dataset.IOStrategy import ImageIOMeta, IORegistry
 
 
-if __name__ == '__main__':
+class BaseImage(metaclass=ImageIOMeta):  # type: ignore
+    suffixes = ["jpg", "png", "jpeg"]
+
+    def load(self):
+        pass
+
+    def write(self):
+        pass
+
+
+print(IORegistry)
+
+
+class ImageTest(BaseImage):
+    suffixes = ["...jpg"]
+
+    def load(self):
+        print("load")
+
+    def write(self):
+        print("write")
+
+
+print(IORegistry)
+
+
+class ImageTest2:
+    suffixes = ["..png"]
+
+    def load(self):
+        pass
+
+    def write(self):
+        pass
+
+
+BaseImage.register(ImageTest2)
+print(IORegistry)
+print(issubclass(ImageTest2, BaseImage))
+
+if __name__ == "__main__":
     pass
