@@ -52,7 +52,7 @@ class LoadProtocol(Protocol):
 
 
 class WriteProtocol(Protocol):
-    def write(self, file_name: Union[str, PathLike[str]]) -> Any:
+    def write(self, file_name: Union[str, PathLike[str]], file: Any) -> Any:
         ...
 
 
