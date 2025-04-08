@@ -250,3 +250,5 @@ cython_debug/
 *.txt
 *.yaml
 *.pkl
+
+*.png
