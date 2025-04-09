@@ -5,7 +5,7 @@ from typing import (
     Union,
     Any,
     Dict,
-    Iterable,
+    Collection,
     Optional,
     TypedDict,
     Type,
@@ -16,25 +16,26 @@ from weakref import WeakSet
 
 class _T_ModalityRegistry(TypedDict):
     BaseIO: WeakSet[Any]
-    base_suffixes: Iterable[str]
+    base_suffixes: Collection[str]
     Custom: Dict[str, WeakSet[Any]]
 
 
 _T_Registry = Dict[str, _T_ModalityRegistry]
+# TODO: using a more safety way to manage the registry, also add contextmanager to achieve IO sandbox mode
 _Registry: _T_Registry = dict()
 
 
-class _T_IOMeta(Protocol):
+class _T_MetaIO(Protocol):
     _io_invalidation_counter: int
     _io_cache: WeakSet
     _io_negative_cache: WeakSet
     _io_registry: WeakSet
     _meta_register: Callable[
-        [Type[Any], bool, _T_ModalityRegistry, Iterable[str]], None
+        [Type[Any], bool, _T_ModalityRegistry, Collection[str]], None
     ]
     is_base: bool
     modality: str
-    register: Callable[[Type[Any], Optional[Iterable[str]]], Type[Any]]
+    register: Callable[[Type[Any], Optional[Collection[str]]], Type[Any]]
     __subclasshook__: Callable[[Any], bool]  # type: ignore
     __instancecheck__: Callable[[Any], bool]
 
@@ -43,7 +44,7 @@ class _T_IOMeta(Protocol):
         return self._io_invalidation_counter
 
 
-_IORegistry: Dict[str, Union[type, _T_IOMeta]] = dict()
+_IORegistry: Dict[str, Union[type, _T_MetaIO]] = dict()
 
 
 class LoadProtocol(Protocol):
@@ -65,7 +66,7 @@ class IOProtocol(LoadProtocol, WriteProtocol, Protocol):
     pass
 
 
-class IOMeta(type):
+class MetaIO(type):
     """
     Metaclass for BaseIO.
     Auto Register for subclass of BaseIO, manually register for subclass of IOProtocol
@@ -108,7 +109,7 @@ class IOMeta(type):
         ]._io_invalidation_counter
         return cls
 
-    def register(cls, subclass, suffixes: Optional[Iterable[str]] = None):
+    def register(cls, subclass, suffixes: Optional[Collection[str]] = None):
         """
         you can register a subclass with this method, without inheriting from BaseIO.
         You can also manually set suffixes
@@ -212,7 +213,7 @@ class IOMeta(type):
         cls,
         is_base,
         registry: _T_ModalityRegistry,
-        suffixes_list: Iterable[str],
+        suffixes_list: Collection[str],
     ):
         """
         auto registry
@@ -234,19 +235,19 @@ def create_io_registry(
     modality: str, is_base: bool = True, cls_name: Optional[str] = None
 ) -> type:
     if cls_name is None:
-        cls_name = f"{modality.capitalize()}IOMeta"
+        cls_name = f"{modality.capitalize()}MetaIO"
     attrs = {
         "modality": modality,
         "is_base": is_base,
         "__module__": __name__,
         "__qualname__": cls_name,
     }
-    new_meta = type(cls_name, (IOMeta,), attrs)
+    new_meta = type(cls_name, (MetaIO,), attrs)
     _IORegistry[modality] = new_meta
     return new_meta
 
 
-def _check_suffixes(suffixes: Iterable[str]) -> set:
+def _check_suffixes(suffixes: Collection[str]) -> set:
     return_suffixes = []
     for suffix in suffixes:
         # The suffix may have uppercase letters, so don't make any adjustment here
@@ -260,76 +261,3 @@ def _check_suffixes(suffixes: Iterable[str]) -> set:
 
 ImageIOMeta = create_io_registry("Image")
 TextIOMeta = create_io_registry("Text")
-
-
-if __name__ == "__main__":
-    ImageIOMeta = create_io_registry("image", True)
-
-    class BaseIO(metaclass=ImageIOMeta):  # type: ignore
-        """
-        You must add all possible suffixes to the list, and files with these suffixes should be able to be read and
-        written by the methods you set
-        """
-
-        # should not use suffixes = [] with @dataclass() decorator, which create a shared list for all subclasses
-        # function field() tell @dataclass() to create an attribute using list function for every subclass
-        suffixes = ["png", "jpg", "jpeg"]
-
-        def check_path(self, path: Union[str, PathLike[str]]):
-            pass
-
-        def load(self, file_name: Union[str, PathLike[str]]) -> Any:
-            raise NotImplementedError
-
-        def write(self, file_name: Union[str, PathLike[str]]) -> Any:
-            raise NotImplementedError
-
-    class TryClass1(ImageIOMeta):  # type: ignore
-        suffixes = ["try1"]
-
-        def load(self, **kwargs):
-            pass
-
-        def write(self, **kwargs):
-            pass
-
-    class TryClass2:
-        suffixes = ["try2"]
-
-        def load(self, **kwargs):
-            pass
-
-        def write(self, **kwargs):
-            pass
-
-    class TryClass3:
-        suffixes = ["try3"]
-
-        def load(self, **kwargs):
-            pass
-
-    class TryClass4:
-        def load(self, **kwargs):
-            pass
-
-        def write(self, **kwargs):
-            pass
-
-    # class BaseIO2(BaseIO):
-    #     suffixes = ["io2"]
-    #
-    #     def load(self, **kwargs):
-    #         pass
-    #
-    #     def write(self, **kwargs):
-    #         pass
-    #
-
-    # print(dir(BaseIO))
-    # BaseIO.register(TryClass1)
-    BaseIO.register(TryClass2)  # type: ignore
-    # print(issubclass(TryClass3, IOProtocol))
-    # BaseIO.register(TryClass4)  # type: ignore
-    print(_Registry)
-    # BaseIO.register(BaseIO2)
-    # BaseIO.register(TryClass3)

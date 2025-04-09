@@ -5,12 +5,12 @@ from typing import Union
 from PIL import Image
 from PIL.Image import Image as img
 
-from dataset.IOStrategy import ImageIOMeta
+from dataset.IOStrategy.IOProtocol import ImageIOMeta
 
 _StrOrBytesPath = Union[str, bytes, PathLike[str], PathLike[bytes], IO[bytes]]
 
 # get PIL_support_format using python3 -m PIL, all format in the list support open and save method
-# tips: png and gif support save_all for multi-frame images, if you want to do that, set a custom image
+# tips: png and gif support save_all for multi-frame images, if you want to do that, set a custom image io for them
 _PIL_support_format = [
     ".blp",
     ".bmp",
@@ -73,7 +73,3 @@ class BaseImage(metaclass=ImageIOMeta):  # type: ignore
 
     def write(self, path: _StrOrBytesPath, image: img):
         image.save(path)  # type: ignore
-
-
-if __name__ == "__main__":
-    pass
