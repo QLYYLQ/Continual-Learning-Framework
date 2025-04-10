@@ -1,30 +1,31 @@
 import os
+from abc import ABC
+from typing import Optional, List, Callable, Tuple
+
 import numpy as np
 import torch
-from typing import Optional, List, Callable, Tuple
 from PIL import Image
-from abc import ABC, abstractmethod
-from dataset.register import dataset_entrypoints
 from torch.utils.data import Dataset
-from random import shuffle
+
+from dataset.register import dataset_entrypoints
 from utils.ImageList import ImageList
 
 
 class BaseSplit(Dataset):
-    def __init__(self,
-                 root: str,
-                 train: bool = True,
-                 transform: Optional[Callable] = None,
-                 target_transform: Optional[Callable] = None,
-                 need_index_name: bool = True,
-                 classes: Optional[dict] = None,
-                 ignore_index: Optional[List[int]] = None,
-                 output_image_size: Tuple[int, int] = (1024, 1024),
-                 mask_value: int = 255,
-                 pixel_mean: Optional[List[int]] = None,
-                 pixel_std: Optional[List[int]] = None,
-                 ):
-
+    def __init__(
+        self,
+        root: str,
+        train: bool = True,
+        transform: Optional[Callable] = None,
+        target_transform: Optional[Callable] = None,
+        need_index_name: bool = True,
+        classes: Optional[dict] = None,
+        ignore_index: Optional[List[int]] = None,
+        output_image_size: Tuple[int, int] = (1024, 1024),
+        mask_value: int = 255,
+        pixel_mean: Optional[List[int]] = None,
+        pixel_std: Optional[List[int]] = None,
+    ):
         if pixel_mean is None:
             self.pixel_mean = [123.675, 116.28, 103.53]
         if pixel_std is None:
@@ -33,7 +34,9 @@ class BaseSplit(Dataset):
             # 一般target中255都是忽略的地方（黑色背景）
             self.ignore_index = [255]
         else:
-            self.ignore_index = ignore_index if 255 in ignore_index else ignore_index + [255]
+            self.ignore_index = (
+                ignore_index if 255 in ignore_index else ignore_index + [255]
+            )
         self.root = root
         self.mask_value = mask_value
         self._check_path_exists(root)
@@ -63,7 +66,7 @@ class BaseSplit(Dataset):
         # 检测是否存在数据集
         if not os.path.exists(path):
             raise FileNotFoundError(
-                f'path not found or corrupted and the path is {path}'
+                f"path not found or corrupted and the path is {path}"
             )
 
     def _init_target_transform(self) -> Callable:
@@ -118,8 +121,12 @@ class BaseSplit(Dataset):
         img_mean = torch.tensor(self.pixel_mean)
         img_mean = img_mean[:, None, None]
 
-        def process_image(image: Image, new_image_size: Tuple[int, int] = target_image_size, std=None,
-                          mean=None) -> ImageList:
+        def process_image(
+            image: Image,
+            new_image_size: Tuple[int, int] = target_image_size,
+            std=None,
+            mean=None,
+        ) -> ImageList:
             is_target_image = False
             if std is None:
                 std = img_std
@@ -144,11 +151,13 @@ class BaseSplit(Dataset):
                 color_image_size = (3, *new_image_size)
             resize_image = torch.zeros(color_image_size, dtype=torch.float)
             if not is_target_image:
-                resize_image[:, :image_size[0], :image_size[1]] = (new_image - mean) / std
+                resize_image[:, : image_size[0], : image_size[1]] = (
+                    new_image - mean
+                ) / std
             else:
-                resize_image[:, :image_size[0], :image_size[1]] = new_image
+                resize_image[:, : image_size[0], : image_size[1]] = new_image
             mask = torch.ones(new_image_size, dtype=torch.bool)
-            mask[:image_size[0], :image_size[1]] = False
+            mask[: image_size[0], : image_size[1]] = False
             mask = mask[None]
             image_list = ImageList(resize_image, mask, image_size)
             return image_list
@@ -158,18 +167,22 @@ class BaseSplit(Dataset):
     def _get_path(self):
         """这个类需要被重写，引导到储存文件图片路径的文档，默认是root_dir下list中train.txt"""
         if self.train:
-            return os.path.join(self.root, "list", 'train.txt')
+            return os.path.join(self.root, "list", "train.txt")
         else:
-            return os.path.join(self.root, "list", 'val.txt')
+            return os.path.join(self.root, "list", "val.txt")
 
     def _load_data_path_to_list(self, path):
         """如果这里的文件是一行中前面是相对于root_dir的image path，后面是target path，例如：JPEGImages/2007_000032.jpg，那么就不用重写"""
         images = []
-        with open(path, 'r') as f:
+        with open(path, "r") as f:
             for line in f:
                 x = line.strip().split(",")
-                images.append((os.path.join(self.root, x[0]).replace(os.sep, "/"),
-                               os.path.join(self.root, x[1]).replace(os.sep, "/")))
+                images.append(
+                    (
+                        os.path.join(self.root, x[0]).replace(os.sep, "/"),
+                        os.path.join(self.root, x[1]).replace(os.sep, "/"),
+                    )
+                )
         return images
 
     def apply_new_data_list(self, new_data_list_path):
@@ -181,7 +194,9 @@ class BaseSplit(Dataset):
         这里默认target中简单通过灰度值储存label，例如label序号是3则图片对应位置灰度值是3，如果是彩色target需要重写此方法
         """
         unique_values = np.unique(np.array(target).flatten())
-        target_text = [self.classes[x] for x in unique_values if x not in self.ignore_index]
+        target_text = [
+            self.classes[x] for x in unique_values if x not in self.ignore_index
+        ]
         text_prompt = ".".join(target_text)
         return text_prompt
 
@@ -197,8 +212,8 @@ class BaseSplit(Dataset):
             self.classes[i] = "ignore"
 
     def __getitem__(self, index):
-        single_batch = {'path': (self.images[index][0], self.images[index][1])}
-        image = Image.open(self.images[index][0]).convert('RGB')
+        single_batch = {"path": (self.images[index][0], self.images[index][1])}
+        image = Image.open(self.images[index][0]).convert("RGB")
         target = Image.open(self.images[index][1])
         if not self.is_filter:
             if self.need_index_name:
@@ -226,17 +241,19 @@ class BaseIncrement(Dataset):
     还算未定义行为，千万不要用，出现错误不负责
     """
 
-    def __init__(self,
-                 split_dataset_name: str = None,
-                 split_config: dict = None,
-                 stage_index_dict: dict = None,
-                 stage_path_dict: dict = None,
-                 train: bool = True,
-                 overlap: bool = True,
-                 masking: bool = True,
-                 data_masking: str = "current",
-                 no_memory: bool = True,
-                 mask_value: int = 0):
+    def __init__(
+        self,
+        split_dataset_name: str = None,
+        split_config: dict = None,
+        stage_index_dict: dict = None,
+        stage_path_dict: dict = None,
+        train: bool = True,
+        overlap: bool = True,
+        masking: bool = True,
+        data_masking: str = "current",
+        no_memory: bool = True,
+        mask_value: int = 0,
+    ):
         self.class_name = None
         self.no_memory = no_memory
         if not self.no_memory:
@@ -254,7 +271,9 @@ class BaseIncrement(Dataset):
 
         self.__strip_ignore(self.labels)
         self.__strip_ignore(self.labels_old)
-        assert not any(i in self.labels_old for i in self.labels)  # 排除忽略的index以后，之前stage训练的label和当前stage训练的label要互斥
+        assert not any(
+            i in self.labels_old for i in self.labels
+        )  # 排除忽略的index以后，之前stage训练的label和当前stage训练的label要互斥
 
         self.train = train
 
@@ -267,7 +286,9 @@ class BaseIncrement(Dataset):
         self.dataset.target_transform = self._create_target_transform
         self.index = 0
         self.update_flag = False
-        self.stage_class = {k: v for k, v in self.dataset.classes.items() if k in self.labels}
+        self.stage_class = {
+            k: v for k, v in self.dataset.classes.items() if k in self.labels
+        }
 
     def __strip_ignore(self, labels):
         for i in self.ignore_index:
@@ -276,10 +297,13 @@ class BaseIncrement(Dataset):
 
     def _create_inverted_order(self):
         # 映射label和索引
-        self.inverted_order = {label: self.order.index(label) for label in self.order if label not in self.ignore_index}
+        self.inverted_order = {
+            label: self.order.index(label)
+            for label in self.order
+            if label not in self.ignore_index
+        }
 
     def _create_target_transform(self, img):
-
         mask_value = self.mask_value
         image_array = np.array(img)
         if self.masking:
@@ -335,7 +359,9 @@ class BaseIncrement(Dataset):
         self.labels_old = labels_old
         self.dataset.apply_new_data_list(self.stage_path_dict[stage_number])
         # shuffle(self.dataset.images)
-        self.class_name = [v for k, v in self.dataset.classes.items() if k in self.labels]
+        self.class_name = [
+            v for k, v in self.dataset.classes.items() if k in self.labels
+        ]
         self.update_flag = True
 
 
@@ -345,8 +371,9 @@ class BaseEvaluate(BaseIncrement):
             kwargs["split_config"]["train"] = False
         super().__init__(**kwargs)
 
+
 # for new branch, improve this file
 
-class BaseDataset(Dataset,ABC):
-    pass
 
+class BaseDataset(Dataset, ABC):
+    pass
