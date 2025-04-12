@@ -8,6 +8,7 @@ from dataset.io.Register import (
     TextIOMeta,
 )
 from dataset.io.handler import BaseImage
+from dataset.io.handler import BaseText, YamlText, JsonText
 
 __all__ = [
     "create_io_registry",
@@ -18,4 +19,7 @@ __all__ = [
     "ImageIOMeta",
     "TextIOMeta",
     "BaseImage",
+    "BaseText",
+    "YamlText",
+    "JsonText",
 ]
