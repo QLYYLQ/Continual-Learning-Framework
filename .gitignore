@@ -252,3 +252,5 @@ cython_debug/
 *.pkl
 
 *.png
+
+test_data/*

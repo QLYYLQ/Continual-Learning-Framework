@@ -1,4 +1,3 @@
-from _weakrefset import WeakSet
 from typing import Optional, Collection
 
 from dataset.io.Protocol import (
@@ -42,10 +41,10 @@ class MetaIO(type):
         mcls._meta_register(cls, is_base, _SuffixRegistry[modality], suffixes_set)
         mcls.is_base = False
         # add base implementation
-        cls._io_registry = WeakSet()
+        cls._io_registry = dict()
         # fast cache for subclass check
-        cls._io_cache = WeakSet()
-        cls._io_negative_cache = WeakSet()
+        cls._io_cache = dict()
+        cls._io_negative_cache = dict()
         # version controller
         cls._io_invalidation_cache_version = _MetaRegistry[
             modality
@@ -103,7 +102,7 @@ class MetaIO(type):
         if subclass in self._io_cache:
             return True
         if self._io_invalidation_cache_version < _Meta._io_invalidation_counter:
-            self._io_negative_cache = WeakSet()
+            self._io_negative_cache = dict()
             self._io_invalidation_cache_version = _Meta._io_invalidation_counter
         elif subclass in self._io_negative_cache:
             return False
@@ -163,15 +162,15 @@ class MetaIO(type):
         """
         if is_base:
             registry["base_suffixes"] = suffixes_list
-            registry["BaseIO"] = WeakSet([cls])
+            registry["BaseIO"] = cls
             registry["Custom"] = dict()
         else:
             for suffix in suffixes_list:
                 if suffix not in registry.keys():
-                    registry["Custom"][suffix] = WeakSet([cls])
+                    registry["Custom"][suffix] = cls
                 else:
                     # TODO: 这里需要添如果覆盖之前注册过的类以后的行为
-                    registry["Custom"][suffix] = WeakSet([cls])
+                    registry["Custom"][suffix] = cls
 
 
 def create_io_registry(

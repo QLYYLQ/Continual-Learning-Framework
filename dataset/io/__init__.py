@@ -1,8 +1,7 @@
-from dataset.io.IOProtocol import _MetaRegistry as ModalityRegistry
-from dataset.io.IOProtocol import _SuffixRegistry as IORegistry
-
+from dataset.io.Protocol import IOProtocol
+from dataset.io.Protocol import _MetaRegistry as ModalityRegistry
+from dataset.io.Protocol import _SuffixRegistry as IORegistry
 from dataset.io.Register import (
-    IOProtocol,
     create_io_registry,
     MetaIO,
     ImageIOMeta,

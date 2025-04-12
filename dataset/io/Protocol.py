@@ -12,13 +12,13 @@ from typing import (
     Callable,
     IO,
 )
-from weakref import WeakSet
+
 
 
 class _T_ModalityRegistry(TypedDict):
-    BaseIO: WeakSet[Any]
+    BaseIO: Type[Any]
     base_suffixes: Collection[str]
-    Custom: Dict[str, WeakSet[Any]]
+    Custom: Dict[str, Type[Any]]
 
 
 _T_Registry = Dict[str, _T_ModalityRegistry]
@@ -28,9 +28,9 @@ _SuffixRegistry: _T_Registry = dict()
 
 class _T_MetaIO(Protocol):
     _io_invalidation_counter: int
-    _io_cache: WeakSet
-    _io_negative_cache: WeakSet
-    _io_registry: WeakSet
+    _io_cache: Dict
+    _io_negative_cache: Dict
+    _io_registry: Dict
     _meta_register: Callable[
         [Type[Any], bool, _T_ModalityRegistry, Collection[str]], None
     ]
