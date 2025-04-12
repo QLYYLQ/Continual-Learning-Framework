@@ -1,13 +1,14 @@
-from dataset.IOStrategy.DefaultIO import BaseImage
-from dataset.IOStrategy.IOProtocol import (
+from dataset.io.IOProtocol import _MetaRegistry as ModalityRegistry
+from dataset.io.IOProtocol import _SuffixRegistry as IORegistry
+
+from dataset.io.Register import (
     IOProtocol,
     create_io_registry,
     MetaIO,
     ImageIOMeta,
     TextIOMeta,
 )
-from dataset.IOStrategy.IOProtocol import _IORegistry as ModalityRegistry
-from dataset.IOStrategy.IOProtocol import _Registry as IORegistry
+from dataset.io.handler import BaseImage
 
 __all__ = [
     "create_io_registry",

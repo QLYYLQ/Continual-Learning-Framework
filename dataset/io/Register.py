@@ -1,69 +1,12 @@
-from os import PathLike
-from typing import (
-    Protocol,
-    runtime_checkable,
-    Union,
-    Any,
-    Dict,
-    Collection,
-    Optional,
-    TypedDict,
-    Type,
-    Callable,
+from _weakrefset import WeakSet
+from typing import Optional, Collection
+
+from dataset.io.Protocol import (
+    _SuffixRegistry,
+    _MetaRegistry,
+    IOProtocol,
+    _T_ModalityRegistry,
 )
-from weakref import WeakSet
-
-
-class _T_ModalityRegistry(TypedDict):
-    BaseIO: WeakSet[Any]
-    base_suffixes: Collection[str]
-    Custom: Dict[str, WeakSet[Any]]
-
-
-_T_Registry = Dict[str, _T_ModalityRegistry]
-# TODO: using a more safety way to manage the registry, also add contextmanager to achieve IO sandbox mode
-_Registry: _T_Registry = dict()
-
-
-class _T_MetaIO(Protocol):
-    _io_invalidation_counter: int
-    _io_cache: WeakSet
-    _io_negative_cache: WeakSet
-    _io_registry: WeakSet
-    _meta_register: Callable[
-        [Type[Any], bool, _T_ModalityRegistry, Collection[str]], None
-    ]
-    is_base: bool
-    modality: str
-    register: Callable[[Type[Any], Optional[Collection[str]]], Type[Any]]
-    __subclasshook__: Callable[[Any], bool]  # type: ignore
-    __instancecheck__: Callable[[Any], bool]
-
-    @property
-    def io_invalidation_counter(self):
-        return self._io_invalidation_counter
-
-
-_IORegistry: Dict[str, Union[type, _T_MetaIO]] = dict()
-
-
-class LoadProtocol(Protocol):
-    def load(self, file_name: Union[str, PathLike[str]]) -> Any:
-        ...
-
-
-class WriteProtocol(Protocol):
-    def write(self, file_name: Union[str, PathLike[str]], file: Any) -> Any:
-        ...
-
-
-@runtime_checkable
-class IOProtocol(LoadProtocol, WriteProtocol, Protocol):
-    """
-    Canonical IO strategy must have load and write methods.
-    """
-
-    pass
 
 
 class MetaIO(type):
@@ -94,9 +37,9 @@ class MetaIO(type):
         if not suffixes_set and not is_base:
             raise ValueError(f"{name} must have suffixes attribute")
         # registering with different modality, first check exits modality
-        if modality not in _Registry:
-            _Registry[modality] = dict()
-        mcls._meta_register(cls, is_base, _Registry[modality], suffixes_set)
+        if modality not in _SuffixRegistry:
+            _SuffixRegistry[modality] = dict()
+        mcls._meta_register(cls, is_base, _SuffixRegistry[modality], suffixes_set)
         mcls.is_base = False
         # add base implementation
         cls._io_registry = WeakSet()
@@ -104,7 +47,7 @@ class MetaIO(type):
         cls._io_cache = WeakSet()
         cls._io_negative_cache = WeakSet()
         # version controller
-        cls._io_invalidation_cache_version = _IORegistry[
+        cls._io_invalidation_cache_version = _MetaRegistry[
             modality
         ]._io_invalidation_counter
         return cls
@@ -143,8 +86,8 @@ class MetaIO(type):
             raise RuntimeError(f"circular reference: {cls} is subclass of {subclass}")
         cls._io_registry.add(subclass)  # type: ignore
         # when you manually register class, that won't be base class
-        cls._meta_register(subclass, False, _Registry[cls.modality], suffixes)  # type: ignore
-        _IORegistry[cls.modality]._io_invalidation_counter += 1  # type: ignore
+        cls._meta_register(subclass, False, _SuffixRegistry[cls.modality], suffixes)  # type: ignore
+        _MetaRegistry[cls.modality]._io_invalidation_counter += 1  # type: ignore
         return subclass
 
     def __subclasscheck__(self, subclass):
@@ -154,7 +97,7 @@ class MetaIO(type):
         两个常量值不匹配，更新self._io_negative_cache），随后检查 subclass hook和self.__mro__，都没查到就添加到
         self._io_negative_cache
         """
-        _Meta = _IORegistry[self.modality]
+        _Meta = _MetaRegistry[self.modality]
         if not isinstance(subclass, type):
             raise TypeError("arg 1 must be a class")
         if subclass in self._io_cache:
@@ -192,7 +135,7 @@ class MetaIO(type):
         """
         rewrite isinstance(instance, self)
         """
-        _Meta = _IORegistry[self.modality]
+        _Meta = _MetaRegistry[self.modality]
         subclass = instance.__class__
         # using cache for quick check
         if subclass in self._io_cache:
@@ -243,7 +186,7 @@ def create_io_registry(
         "__qualname__": cls_name,
     }
     new_meta = type(cls_name, (MetaIO,), attrs)
-    _IORegistry[modality] = new_meta
+    _MetaRegistry[modality] = new_meta
     return new_meta
 
 
