@@ -1,3 +1,5 @@
+from typing import Any
+
 from PIL import Image
 from PIL.Image import Image as img
 
@@ -62,12 +64,11 @@ _PIL_support_format = [
 class BaseImage(metaclass=ImageIOMeta):  # type: ignore
     suffixes = _PIL_support_format
 
-    def load(self, path: _StrOrBytesPath):
+    def load(self, path: _StrOrBytesPath)->Any:
         # There is try inside Image.open(), so in there, we don't use key word: try
         opened_image = Image.open(path)  # type: ignore
         return opened_image
 
-    @staticmethod
-    def write(path: _StrOrBytesPath, image: img):
+    def write(self, path: _StrOrBytesPath, image: img):
         # same reason
         image.save(path)  # type: ignore

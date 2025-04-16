@@ -59,7 +59,7 @@ class _T_MetaIO(Protocol):
     __instancecheck__: Callable[[Any], bool]
 
     @property
-    def io_invalidation_counter(self):
+    def io_invalidation_counter(self) -> int:
         return self._io_invalidation_counter
 
 

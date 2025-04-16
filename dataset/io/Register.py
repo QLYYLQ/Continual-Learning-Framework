@@ -1,4 +1,4 @@
-from typing import Optional, Collection
+from typing import Optional, Collection, Any
 
 from dataset.io.Protocol import (
     _SuffixRegistry,
@@ -17,7 +17,7 @@ class MetaIO(type):
 
     _io_invalidation_counter = 0
 
-    def __new__(mcls, name, bases, namespace):
+    def __new__(mcls, name, bases, namespace) -> Any:
         # check the basic attribute
         modality = getattr(mcls, "modality", None)
         is_base = getattr(mcls, "is_base", None)
@@ -51,7 +51,7 @@ class MetaIO(type):
         ]._io_invalidation_counter
         return cls
 
-    def register(cls, subclass, suffixes: Optional[Collection[str]] = None):
+    def register(cls, subclass: Any, suffixes: Optional[Collection[str]] = None) -> Any:
         """
         you can register a subclass with this method, without inheriting from BaseIO.
         You can also manually set suffixes
@@ -89,7 +89,7 @@ class MetaIO(type):
         _MetaRegistry[cls.modality]._io_invalidation_counter += 1  # type: ignore
         return subclass
 
-    def __subclasscheck__(self, subclass):
+    def __subclasscheck__(self, subclass) -> bool:
         """
         rewrite issubclass(subclass, self)
         这里的检查机制是：先检查有没有在 self._io_cache的缓存中，再检查在不在self._io_negative_cache的缓存中（如果新加入了注册 ->
@@ -130,7 +130,7 @@ class MetaIO(type):
         self._io_negative_cache.add(subclass)
         return False
 
-    def __instancecheck__(self, instance):
+    def __instancecheck__(self, instance) -> bool:
         """
         rewrite isinstance(instance, self)
         """
@@ -152,11 +152,11 @@ class MetaIO(type):
 
     @staticmethod
     def _meta_register(
-        cls,
-        is_base,
+        cls: Any,
+        is_base: bool,
         registry: _T_ModalityRegistry,
         suffixes_list: Collection[str],
-    ):
+    ) -> None:
         """
         auto registry
         """
