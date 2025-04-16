@@ -67,6 +67,7 @@ class BaseImage(metaclass=ImageIOMeta):  # type: ignore
         opened_image = Image.open(path)  # type: ignore
         return opened_image
 
-    def write(self, path: _StrOrBytesPath, image: img):
+    @staticmethod
+    def write(path: _StrOrBytesPath, image: img):
         # same reason
         image.save(path)  # type: ignore

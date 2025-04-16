@@ -1,3 +1,4 @@
+from dataset.io.Mapping import IO
 from dataset.io.Protocol import IOProtocol
 from dataset.io.Protocol import _MetaRegistry as ModalityRegistry
 from dataset.io.Protocol import _SuffixRegistry as IORegistry
@@ -7,8 +8,7 @@ from dataset.io.Register import (
     ImageIOMeta,
     TextIOMeta,
 )
-from dataset.io.handler import BaseImage
-from dataset.io.handler import BaseText, YamlText, JsonText
+from dataset.io.handler import BaseText, YamlText, JsonText, BaseImage
 
 __all__ = [
     "create_io_registry",
@@ -22,4 +22,5 @@ __all__ = [
     "BaseText",
     "YamlText",
     "JsonText",
+    "IO",
 ]

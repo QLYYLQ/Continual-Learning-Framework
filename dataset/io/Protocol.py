@@ -14,11 +14,29 @@ from typing import (
 )
 
 
+class LoadProtocol(Protocol):
+    def load(self, file_name: Union[str, PathLike[str]]) -> Any:
+        ...
+
+
+class WriteProtocol(Protocol):
+    def write(self, file_name: Union[str, PathLike[str]], file: Any) -> Any:
+        ...
+
+
+@runtime_checkable
+class IOProtocol(LoadProtocol, WriteProtocol, Protocol):
+    """
+    Canonical IO strategy must have load and write methods.
+    """
+
+    pass
+
 
 class _T_ModalityRegistry(TypedDict):
-    BaseIO: Type[Any]
+    BaseIO: Type[IOProtocol]
     base_suffixes: Collection[str]
-    Custom: Dict[str, Type[Any]]
+    Custom: Dict[str, Type[IOProtocol]]
 
 
 _T_Registry = Dict[str, _T_ModalityRegistry]
@@ -46,25 +64,6 @@ class _T_MetaIO(Protocol):
 
 
 _MetaRegistry: Dict[str, Union[type, _T_MetaIO]] = dict()
-
-
-class LoadProtocol(Protocol):
-    def load(self, file_name: Union[str, PathLike[str]]) -> Any:
-        ...
-
-
-class WriteProtocol(Protocol):
-    def write(self, file_name: Union[str, PathLike[str]], file: Any) -> Any:
-        ...
-
-
-@runtime_checkable
-class IOProtocol(LoadProtocol, WriteProtocol, Protocol):
-    """
-    Canonical IO strategy must have load and write methods.
-    """
-
-    pass
 
 
 _StrOrBytesPath = Union[str, bytes, PathLike[str], PathLike[bytes], IO[bytes]]
