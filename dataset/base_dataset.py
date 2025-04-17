@@ -1,6 +1,6 @@
 import os
-from abc import ABC
-from typing import Optional, List, Callable, Tuple, Union
+from abc import ABC, abstractmethod
+from typing import Optional, List, Callable, Tuple, Union, Iterable
 
 import numpy as np
 import torch
@@ -373,29 +373,81 @@ class BaseEvaluate(BaseIncrement):
 
 
 # for new branch, improve this file
-from typing import ClassVar, Protocol, Literal, Any
+from typing import Protocol, Literal, Any
 from os import PathLike
-
-
-class _BaseDataset(Dataset, ABC):
-    REQUIRED_ATTRS: ClassVar[list[str]] = ["root", "classes", "image_size"]
-
-    def __init_subclass__(cls, **kwargs):
-        super().__init_subclass__(**kwargs)
-        for attr in cls.REQUIRED_ATTRS:
-            if not hasattr(cls, attr):
-                raise ValueError(f"class {cls.__name__} must have attribute {attr}")
-
-    @staticmethod
-    def _get_path(self) -> None:
-        pass
+from dataclasses import dataclass
+from dataset.io.Protocol import IOProtocol
 
 
 class _T_Dataset(Protocol):
     root: Union[PathLike[str], str]
+    io: IOProtocol
+    pixel_mean: Tuple[float, float, float]
+    pixel_std: Tuple[float, float, float]
     image_size: Tuple[int, int]
     dataset_type: Literal["train", "val", "test"]
-    label_strategy: Literal["current", "full", "history"]
     image_list: list[tuple[str, str]]
-    image_transform: Callable[[Any], Any]
-    label_transform: Callable[[Any], Any]
+    spatial_transform: Optional[Callable[[Any], Any]]
+    image_transform: Optional[Callable[[Any], Any]]
+    label_transform: Optional[Callable[[Any], Any]]
+
+
+@dataclass
+class _BaseDataset(Dataset, _T_Dataset, ABC):
+    """
+    A template class for datasets.
+    Attributes:
+        No attributes are explicitly declared in this class since it serves as a
+        base structure for implementing datasets.
+
+    """
+
+    @abstractmethod
+    def _get_path(self) -> None:
+        ...
+
+    def load(
+        self,
+        path_list: Union[Iterable[PathLike[str]], Iterable[str]],
+        modality: Optional[str] = None,
+    ) -> Any:
+        file_list: list[Any] = []
+        for file in path_list:
+            file_list.append(self.io.load(file, modality))
+        return file_list
+
+    def __getitem__(self, index: int) -> Any:
+        path_list = self.image_list[index]
+        image, label = self.load(path_list)
+        image, label = self.total_transform(image, label)
+        return image, label
+
+    def _get_get_item(self, index, modality: Optional[str] = None):
+        path_list = self.image_list[index]
+        image, label = self.load(path_list)
+
+    def total_transform(self, image: Any, label: Any) -> Any:
+        if self.spatial_transform:
+            image = self.spatial_transform(image)
+            label = self.spatial_transform(label)
+        if self.image_transform:
+            image = self.image_transform(image)
+        if self.label_transform:
+            label = self.label_transform(label)
+        return image, label
+
+
+@dataclass
+class _BaseIncrement(_BaseDataset, ABC):
+    stage: int
+    label_strategy: Literal["current", "full", "history"]
+    incremental_transform: Callable[[Any], Any]
+
+    @abstractmethod
+    def update_stage(self, stage_number: int) -> None:
+        ...
+
+    def __getitem__(self, index: int) -> Any:
+        image, label = super().__getitem__(index)
+        label = self.incremental_transform(label)
+        return image, label

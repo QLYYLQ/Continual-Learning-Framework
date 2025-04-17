@@ -16,7 +16,9 @@ from typing import (
 
 
 class LoadProtocol(Protocol):
-    def load(self, file_name: Union[str, PathLike[str]]) -> Any:
+    def load(
+        self, file_name: Union[str, PathLike[str]], modality: Optional[str] = None
+    ) -> Any:
         ...
 
 

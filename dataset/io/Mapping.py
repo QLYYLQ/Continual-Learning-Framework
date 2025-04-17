@@ -22,7 +22,7 @@ class IO:
         self._io_cache: dict[str, IOProtocol] = {}  # type: ignore
 
     def load(self, path: PathLike[str], modality: Optional[str] = None) -> Any:
-        io_method = self.get_io(path)
+        io_method = self.get_io(path, modality)
         return io_method.load(path)
 
     def write(
