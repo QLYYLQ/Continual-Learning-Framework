@@ -1,6 +1,6 @@
 import os
 from abc import ABC
-from typing import Optional, List, Callable, Tuple
+from typing import Optional, List, Callable, Tuple, Union
 
 import numpy as np
 import torch
@@ -373,7 +373,29 @@ class BaseEvaluate(BaseIncrement):
 
 
 # for new branch, improve this file
+from typing import ClassVar, Protocol, Literal, Any
+from os import PathLike
 
 
-class BaseDataset(Dataset, ABC):
-    pass
+class _BaseDataset(Dataset, ABC):
+    REQUIRED_ATTRS: ClassVar[list[str]] = ["root", "classes", "image_size"]
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        for attr in cls.REQUIRED_ATTRS:
+            if not hasattr(cls, attr):
+                raise ValueError(f"class {cls.__name__} must have attribute {attr}")
+
+    @staticmethod
+    def _get_path(self) -> None:
+        pass
+
+
+class _T_Dataset(Protocol):
+    root: Union[PathLike[str], str]
+    image_size: Tuple[int, int]
+    dataset_type: Literal["train", "val", "test"]
+    label_strategy: Literal["current", "full", "history"]
+    image_list: list[tuple[str, str]]
+    image_transform: Callable[[Any], Any]
+    label_transform: Callable[[Any], Any]

@@ -4,13 +4,14 @@ from typing import (
     runtime_checkable,
     Union,
     Any,
+    Set,
     Dict,
     Collection,
     Optional,
     TypedDict,
     Type,
-    Callable,
     IO,
+    ClassVar,
 )
 
 
@@ -44,26 +45,48 @@ _T_Registry = Dict[str, _T_ModalityRegistry]
 _SuffixRegistry: _T_Registry = dict()
 
 
+@runtime_checkable
 class _T_MetaIO(Protocol):
-    _io_invalidation_counter: int
-    _io_cache: Dict
-    _io_negative_cache: Dict
-    _io_registry: Dict
-    _meta_register: Callable[
-        [Type[Any], bool, _T_ModalityRegistry, Collection[str]], None
-    ]
+    _io_invalidation_counter: ClassVar[int]
+    _io_cache: Set
+    _io_negative_cache: Set
+    _io_registry: Set
     is_base: bool
     modality: str
-    register: Callable[[Type[Any], Optional[Collection[str]]], Type[Any]]
-    __subclasshook__: Callable[[Any], bool]  # type: ignore
-    __instancecheck__: Callable[[Any], bool]
 
-    @property
-    def io_invalidation_counter(self) -> int:
-        return self._io_invalidation_counter
+    def _meta_register(
+        self: Any,
+        is_base: bool,
+        registry: _T_ModalityRegistry,
+        suffixes_list: Collection[str],
+    ) -> None:
+        ...
+
+    @staticmethod
+    def register(
+        cls: Any, subclass: Any, suffixes: Optional[Collection[str]] = None
+    ) -> Any:
+        ...
+
+    def __subclasscheck__(self: Any, subclass: Any) -> bool:
+        ...
+
+    def __instancecheck__(self: Any, instance: Any) -> bool:
+        ...
 
 
-_MetaRegistry: Dict[str, Union[type, _T_MetaIO]] = dict()
+@runtime_checkable
+class _T_IOClass(
+    _T_MetaIO,
+    Protocol,
+):
+    _io_invalidation_cache_version: int
+
+    def __subclasses__(self) -> Any:
+        ...
+
+
+_MetaRegistry: Dict[str, _T_MetaIO] = dict()
 
 
 _StrOrBytesPath = Union[str, bytes, PathLike[str], PathLike[bytes], IO[bytes]]

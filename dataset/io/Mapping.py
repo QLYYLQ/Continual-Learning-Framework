@@ -9,7 +9,7 @@ class IO:
     Finding the IO class from _SuffixRegistry using the suffix of the file name.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """
         Represents the initialization of an instance of a class. Sets up an internal dictionary
         to cache IOProtocol mappings identified by string keys: {modality.suffix: instance}. This is used to store and
@@ -81,7 +81,7 @@ class IO:
                 io_class = modality_registry["BaseIO"]
         return io_class
 
-    def delete_cache(self, name: str):
+    def delete_cache(self, name: str) -> None:
         try:
             del self._io_cache[name]
         except KeyError:

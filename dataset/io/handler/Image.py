@@ -64,11 +64,13 @@ _PIL_support_format = [
 class BaseImage(metaclass=ImageIOMeta):  # type: ignore
     suffixes = _PIL_support_format
 
-    def load(self, path: _StrOrBytesPath)->Any:
+    @staticmethod
+    def load(path: _StrOrBytesPath) -> Any:
         # There is try inside Image.open(), so in there, we don't use key word: try
         opened_image = Image.open(path)  # type: ignore
         return opened_image
 
-    def write(self, path: _StrOrBytesPath, image: img):
+    @staticmethod
+    def write(path: _StrOrBytesPath, image: img) -> None:
         # same reason
         image.save(path)  # type: ignore

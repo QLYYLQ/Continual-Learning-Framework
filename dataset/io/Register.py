@@ -1,10 +1,12 @@
-from typing import Optional, Collection, Any
+from typing import Optional, Collection, Any, ClassVar
 
 from dataset.io.Protocol import (
     _SuffixRegistry,
     _MetaRegistry,
     IOProtocol,
     _T_ModalityRegistry,
+    _T_IOClass,
+    _T_MetaIO,
 )
 
 
@@ -15,9 +17,9 @@ class MetaIO(type):
     This class is used inside Framework
     """
 
-    _io_invalidation_counter = 0
+    _io_invalidation_counter: ClassVar[int] = 0
 
-    def __new__(mcls, name, bases, namespace) -> Any:
+    def __new__(mcls: _T_MetaIO, name: Any, bases: Any, namespace: Any) -> Any:
         # check the basic attribute
         modality = getattr(mcls, "modality", None)
         is_base = getattr(mcls, "is_base", None)
@@ -26,7 +28,7 @@ class MetaIO(type):
         ), "You should set modality and is_base"
 
         # create class
-        cls = super().__new__(mcls, name, bases, namespace)
+        cls: _T_IOClass = super().__new__(mcls, name, bases, namespace)  # type: ignore
 
         # set attribute for class
         setattr(cls, "modality", modality)
@@ -37,21 +39,23 @@ class MetaIO(type):
             raise ValueError(f"{name} must have suffixes attribute")
         # registering with different modality, first check exits modality
         if modality not in _SuffixRegistry:
-            _SuffixRegistry[modality] = dict()
-        mcls._meta_register(cls, is_base, _SuffixRegistry[modality], suffixes_set)
+            _SuffixRegistry[modality] = dict()  # type: ignore
+        mcls._meta_register(cls, is_base, _SuffixRegistry[modality], suffixes_set)  # type: ignore
         mcls.is_base = False
         # add base implementation
-        cls._io_registry = dict()
+        cls._io_registry = set()
         # fast cache for subclass check
-        cls._io_cache = dict()
-        cls._io_negative_cache = dict()
+        cls._io_cache = set()
+        cls._io_negative_cache = set()
         # version controller
         cls._io_invalidation_cache_version = _MetaRegistry[
             modality
         ]._io_invalidation_counter
         return cls
 
-    def register(cls, subclass: Any, suffixes: Optional[Collection[str]] = None) -> Any:
+    def register(
+        cls: Any, subclass: Any, suffixes: Optional[Collection[str]] = None
+    ) -> Any:
         """
         you can register a subclass with this method, without inheriting from BaseIO.
         You can also manually set suffixes
@@ -89,7 +93,7 @@ class MetaIO(type):
         _MetaRegistry[cls.modality]._io_invalidation_counter += 1  # type: ignore
         return subclass
 
-    def __subclasscheck__(self, subclass) -> bool:
+    def __subclasscheck__(self: _T_IOClass, subclass: Any) -> bool:
         """
         rewrite issubclass(subclass, self)
         这里的检查机制是：先检查有没有在 self._io_cache的缓存中，再检查在不在self._io_negative_cache的缓存中（如果新加入了注册 ->
@@ -102,7 +106,7 @@ class MetaIO(type):
         if subclass in self._io_cache:
             return True
         if self._io_invalidation_cache_version < _Meta._io_invalidation_counter:
-            self._io_negative_cache = dict()
+            self._io_negative_cache = set()
             self._io_invalidation_cache_version = _Meta._io_invalidation_counter
         elif subclass in self._io_negative_cache:
             return False
@@ -130,7 +134,7 @@ class MetaIO(type):
         self._io_negative_cache.add(subclass)
         return False
 
-    def __instancecheck__(self, instance) -> bool:
+    def __instancecheck__(self: _T_IOClass, instance: Any) -> bool:
         """
         rewrite isinstance(instance, self)
         """
@@ -185,7 +189,7 @@ def create_io_registry(
         "__qualname__": cls_name,
     }
     new_meta = type(cls_name, (MetaIO,), attrs)
-    _MetaRegistry[modality] = new_meta
+    _MetaRegistry[modality] = new_meta  # type: ignore
     return new_meta
 
 
