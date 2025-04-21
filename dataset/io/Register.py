@@ -1,4 +1,5 @@
-from typing import Optional, Collection, Any, ClassVar
+from typing import Optional, Collection, Any, ClassVar, Type
+from weakref import WeakSet
 
 from dataset.io.Protocol import (
     _SuffixRegistry,
@@ -19,7 +20,7 @@ class MetaIO(type):
 
     _io_invalidation_counter: ClassVar[int] = 0
 
-    def __new__(mcls: _T_MetaIO, name: Any, bases: Any, namespace: Any) -> Any:
+    def __new__(mcls: _T_MetaIO, name: Any, bases: Any, namespace: Any) -> _T_IOClass:
         # check the basic attribute
         modality = getattr(mcls, "modality", None)
         is_base = getattr(mcls, "is_base", None)
@@ -43,10 +44,10 @@ class MetaIO(type):
         mcls._meta_register(cls, is_base, _SuffixRegistry[modality], suffixes_set)  # type: ignore
         mcls.is_base = False
         # add base implementation
-        cls._io_registry = set()
+        cls._io_registry = WeakSet()
         # fast cache for subclass check
-        cls._io_cache = set()
-        cls._io_negative_cache = set()
+        cls._io_cache = WeakSet()
+        cls._io_negative_cache = WeakSet()
         # version controller
         cls._io_invalidation_cache_version = _MetaRegistry[
             modality
@@ -87,9 +88,9 @@ class MetaIO(type):
             return subclass
         if issubclass(cls, subclass):
             raise RuntimeError(f"circular reference: {cls} is subclass of {subclass}")
-        cls._io_registry.add(subclass)  # type: ignore
+        cls._io_registry.add(subclass)
         # when you manually register class, that won't be base class
-        cls._meta_register(subclass, False, _SuffixRegistry[cls.modality], suffixes)  # type: ignore
+        cls._meta_register(subclass, False, _SuffixRegistry[cls.modality], suffixes)
         _MetaRegistry[cls.modality]._io_invalidation_counter += 1  # type: ignore
         return subclass
 
@@ -100,13 +101,16 @@ class MetaIO(type):
         两个常量值不匹配，更新self._io_negative_cache），随后检查 subclass hook和self.__mro__，都没查到就添加到
         self._io_negative_cache
         """
-        _Meta = _MetaRegistry[self.modality]
         if not isinstance(subclass, type):
             raise TypeError("arg 1 must be a class")
+        if not issubclass(subclass, IOProtocol):
+            return False
+        # assert subclass is not IOProtocol, "you can't subclass IOProtocol directly"
+        _Meta = _MetaRegistry[self.modality]
         if subclass in self._io_cache:
             return True
         if self._io_invalidation_cache_version < _Meta._io_invalidation_counter:
-            self._io_negative_cache = set()
+            self._io_negative_cache: WeakSet[Type[IOProtocol]] = WeakSet()
             self._io_invalidation_cache_version = _Meta._io_invalidation_counter
         elif subclass in self._io_negative_cache:
             return False
@@ -144,7 +148,7 @@ class MetaIO(type):
         if subclass in self._io_cache:
             return True
         subtype = type(instance)
-        if subtype in subclass:
+        if subtype is subclass:
             # when negative_cache is the newest version
             if (
                 self._io_invalidation_cache_version == _Meta._io_invalidation_counter
@@ -179,7 +183,7 @@ class MetaIO(type):
 
 def create_io_registry(
     modality: str, is_base: bool = True, cls_name: Optional[str] = None
-) -> type:
+) -> _T_MetaIO:
     if cls_name is None:
         cls_name = f"{modality.capitalize()}MetaIO"
     attrs = {
@@ -190,7 +194,7 @@ def create_io_registry(
     }
     new_meta = type(cls_name, (MetaIO,), attrs)
     _MetaRegistry[modality] = new_meta  # type: ignore
-    return new_meta
+    return new_meta  # type: ignore
 
 
 def _check_suffixes(suffixes: Collection[str]) -> set:

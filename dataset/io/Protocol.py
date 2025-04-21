@@ -4,7 +4,6 @@ from typing import (
     runtime_checkable,
     Union,
     Any,
-    Set,
     Dict,
     Collection,
     Optional,
@@ -13,6 +12,7 @@ from typing import (
     IO,
     ClassVar,
 )
+from weakref import WeakSet
 
 
 class LoadProtocol(Protocol):
@@ -50,9 +50,9 @@ _SuffixRegistry: _T_Registry = dict()
 @runtime_checkable
 class _T_MetaIO(Protocol):
     _io_invalidation_counter: ClassVar[int]
-    _io_cache: Set
-    _io_negative_cache: Set
-    _io_registry: Set
+    _io_cache: WeakSet[Type[IOProtocol]]
+    _io_negative_cache: WeakSet[Type[IOProtocol]]
+    _io_registry: WeakSet[Type[IOProtocol]]
     is_base: bool
     modality: str
 
