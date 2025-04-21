@@ -20,7 +20,7 @@ class MetaIO(type):
 
     _io_invalidation_counter: ClassVar[int] = 0
 
-    def __new__(mcls: _T_MetaIO, name: Any, bases: Any, namespace: Any) -> _T_IOClass:
+    def __new__(mcls: _T_MetaIO, name: Any, bases: Any, namespace: Any) -> _T_IOClass:  # type: ignore
         # check the basic attribute
         modality = getattr(mcls, "modality", None)
         is_base = getattr(mcls, "is_base", None)
