@@ -1,13 +1,16 @@
 from os import PathLike
 from os.path import splitext
 from pathlib import Path
-from typing import Optional, Type, Any, TypeVar, Union
+from typing import Optional, Type, Any, TypeVar, Union, Literal
+
 
 from dataset.io.Protocol import _T_ModalityRegistry, IOProtocol, _SuffixRegistry
 
 _T_Return_Method = TypeVar("_T_Return_Method")
 
 _T_Path = TypeVar("_T_Path", bound=Union[str, PathLike])
+
+_mode_tye = Literal["tensor", "ndarray", "default"]
 
 
 class IO:
@@ -18,16 +21,18 @@ class IO:
     def __init__(self) -> None:
         """
         Represents the initialization of an instance of a class. Sets up an internal dictionary
-        to cache IOProtocol mappings identified by string keys: {modality.suffix: instance}. This is used to store and
+        to cache IOProtocol mappings identified by string keys: {}. This is used to store and
         retrieve input/output operations efficiently.
 
         Attributes:
             self._io_cache (dict[str, Type[IOProtocol]]): A dictionary used for caching IOProtocol
             instances with string keys.
+            self._previous_method (IOProtocol): Previous IOProtocol instance
+            self._previous_suffix (str): Previous path suffix
         """
         self._previous_method: Optional[IOProtocol] = None
         self._previous_suffix: Optional[str] = None
-        self._io_cache: dict[str, IOProtocol] = {}  # type: ignore
+        self._io_cache: dict[str, IOProtocol] = {}
 
     def load(self, path: _T_Path, modality: Optional[str] = None) -> Any:
         io_method = self.get_io(path, modality)

@@ -254,3 +254,4 @@ cython_debug/
 *.png
 
 test_data/*
+/try_pyarrow/
