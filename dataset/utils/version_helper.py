@@ -75,3 +75,11 @@ class Version:
 
     def __hash__(self):
         return hash(Version._tuple_to_str(self.tuple))
+
+
+if __name__ == "__main__":
+    version1 = Version("1.0.0")
+    version2 = Version("1.0.1")
+    print(version2 > version1)
+    print(version2 < version1)
+    print(version1.tuple)

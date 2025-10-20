@@ -367,6 +367,7 @@ from abc import abstractmethod, ABC
 from dataclasses import dataclass, field
 from os import PathLike
 from datasets import Dataset
+
 # for new branch, improve this file
 from typing import (
     Protocol,
@@ -452,14 +453,17 @@ class _VisionBaseDataset(Dataset, _T_Vision_Dataset, ABC):
             label = self.label_transform(label)
         return image, label
 
+
 @dataclass
 class _DataManager(ABC):
     cache_dir: Optional[Union[PathLike[str], str]] = None
+
     @abstractmethod
     def filter(self):
         ...
+
     @abstractmethod
-    def map(self,num_proc:int,batched:bool=False):
+    def map(self, num_proc: int, batched: bool = False):
         ...
 
 
