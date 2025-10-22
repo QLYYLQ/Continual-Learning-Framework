@@ -1,6 +1,5 @@
 import copy
-from itertools import groupby
-from typing import TYPE_CHECKING, Union, Optional, TypeVar
+from typing import Union, TypeVar
 
 import numpy as np
 import pyarrow as pa
@@ -42,15 +41,14 @@ class ConcatenationTable(Table):
             table = pa.concat_tables([table, empty_table], promote_options="default")
         ConcatenationTable.__init__(self, table, blocks=blocks)
 
-
     @classmethod
     def _consolidate_blocks(cls, blocks: _T_Table) -> _T_Table:
         if isinstance(blocks, BlockTable):
             return blocks
         elif isinstance(blocks[0], BlockTable):
-            return merge_specific_table_type_from_blocks(MemoryTable,blocks, axis=0)
+            return merge_specific_table_type_from_blocks(MemoryTable, blocks, axis=0)
         else:
-            return merge_specific_table_type_from_blocks(MemoryTable,blocks)
+            return merge_specific_table_type_from_blocks(MemoryTable, blocks)
 
     @classmethod
     def from_blocks(cls, blocks: _T_Table) -> "ConcatenationTable":
@@ -429,6 +427,23 @@ class ConcatenationTable(Table):
         for tables in self.blocks:
             blocks.append([t.select([c for c in columns if c in t.column_names], *args, **kwargs) for t in tables])
         return ConcatenationTable(table, blocks)
+
+
+def concat_tables(tables: list[Table], axis: int = 0) -> Table:
+    """
+    Concatenate tables.
+
+    Args:
+        tables (list of `Table`):
+            List of tables to be concatenated.
+        axis (`{0, 1}`, defaults to `0`, meaning over rows):
+            Axis to concatenate over, where `0` means over rows (vertically) and `1` means over columns
+            (horizontally).
+    """
+    tables = list(tables)
+    if len(tables) == 1:
+        return tables[0]
+    return ConcatenationTable.from_tables(tables, axis=axis)
 
 
 if __name__ == '__main__':

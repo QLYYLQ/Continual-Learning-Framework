@@ -1,3 +1,4 @@
+import dataclasses
 import re
 from functools import total_ordering
 from dataclasses import dataclass
@@ -75,6 +76,12 @@ class Version:
 
     def __hash__(self):
         return hash(Version._tuple_to_str(self.tuple))
+    @classmethod
+    def from_dict(cls,dic:dict):
+        field_name = {f.name for f in dataclasses.fields(cls)}
+        return cls(**{k:v for k,v in dic.items() if k in field_name})
+    def to_yaml_string(self):
+        return self.version_str
 
 
 if __name__ == "__main__":
