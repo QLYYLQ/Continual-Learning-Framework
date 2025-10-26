@@ -24,31 +24,25 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from fsspec.core import url_to_fs
 
-
 # import config
 import CLTrainingFramework.dataset.utils.dataset_config as dataset_config
 import CLTrainingFramework.dataset.utils.package_config as package_config
-
-
-from CLTrainingFramework.dataset.schema import Audio, Schema, Image, Pdf, Value, Video,map_nested_schema,SchemaType
+from CLTrainingFramework.dataset.arrow_handler.arrow_dataset.dataset_info import DatasetInfo
+from CLTrainingFramework.dataset.arrow_handler.arrow_table.utils import array_cast, _cast_array_to_schema, table_cast
 from CLTrainingFramework.dataset.arrow_utils import _ArrayXDExtensionType
-
-
+from CLTrainingFramework.dataset.schema import Audio, Schema, Image, Pdf, Value, Video, map_nested_schema, SchemaType, \
+    pyarrow_to_schema, schema_to_pyarrow
+from CLTrainingFramework.dataset.schema.wirte_file import prepare_for_storage
+from CLTrainingFramework.dataset.utils import logging
+from .filesystems import is_remote_filesystem
+from .keyhash import DuplicatedKeysError, KeyHasher
+from .table import embed_table_storage
 from ..features import (
-    cast_to_python_objects,
-    generate_from_arrow_type,
-    get_nested_type,
     list_of_np_array_to_pyarrow_listarray,
     numpy_to_pyarrow_listarray,
     to_pyarrow_listarray,
 )
-from .filesystems import is_remote_filesystem
-from CLTrainingFramework.dataset.arrow_handler.arrow_dataset.dataset_info import DatasetInfo
-from .keyhash import DuplicatedKeysError, KeyHasher
-from .table import embed_table_storage
-from CLTrainingFramework.dataset.arrow_handler.arrow_table.utils import array_cast, _cast_array_to_schema, table_cast
-from CLTrainingFramework.dataset.utils import logging
-from ..utils.py_utils_mine import as_dict,first_non_null_non_empty_value
+from ..utils.py_utils_mine import as_dict, first_non_null_non_empty_value
 
 logger = logging.get_logger(__name__)
 
@@ -171,7 +165,7 @@ class TypedSequence:
             SchemaType: inferred feature type of the sequence.
         """
         if self._inferred_type is None:
-            self._inferred_type = generate_from_arrow_type(pa.array(self).type)
+            self._inferred_type = pyarrow_to_schema(pa.array(self).type)
         return self._inferred_type
 
     @staticmethod
@@ -227,9 +221,9 @@ class TypedSequence:
             type = self.try_type if self.trying_type else self.type
         else:
             type = self._inferred_type
-        pa_type = get_nested_type(type) if type is not None else None
+        pa_type = schema_to_pyarrow(type) if type is not None else None
         optimized_int_pa_type = (
-            get_nested_type(self.optimized_int_type) if self.optimized_int_type is not None else None
+            schema_to_pyarrow(self.optimized_int_type) if self.optimized_int_type is not None else None
         )
         trying_cast_to_python_objects = False
         try:
@@ -245,7 +239,7 @@ class TypedSequence:
                 out = list_of_np_array_to_pyarrow_listarray(data)
             else:
                 trying_cast_to_python_objects = True
-                out = pa.array(cast_to_python_objects(data, only_1d_for_numpy=True))
+                out = pa.array(prepare_for_storage(data, only_check_first_element=True))
             # use smaller integer precisions if possible
             if self.trying_int_optimization:
                 if pa.types.is_int64(out.type):
@@ -281,7 +275,7 @@ class TypedSequence:
                         return list_of_np_array_to_pyarrow_listarray(data)
                     else:
                         trying_cast_to_python_objects = True
-                        return pa.array(cast_to_python_objects(data, only_1d_for_numpy=True))
+                        return pa.array(prepare_for_storage(data, only_check_first_element=True))
                 except pa.lib.ArrowInvalid as e:
                     if "overflow" in str(e):
                         raise OverflowError(
@@ -295,7 +289,7 @@ class TypedSequence:
                         return out
                     elif trying_cast_to_python_objects and "Could not convert" in str(e):
                         out = pa.array(
-                            cast_to_python_objects(data, only_1d_for_numpy=True, optimize_list_casting=False)
+                            prepare_for_storage(data, keep_dim=False, only_check_first_element=False)
                         )
                         if type is not None:
                             out = _cast_array_to_schema(
@@ -313,7 +307,7 @@ class TypedSequence:
                 logger.info(f"Failed to cast a sequence to {optimized_int_pa_type_str}. Falling back to int64.")
                 return out
             elif trying_cast_to_python_objects and "Could not convert" in str(e):
-                out = pa.array(cast_to_python_objects(data, only_1d_for_numpy=True, optimize_list_casting=False))
+                out = pa.array(prepare_for_storage(data, keep_dim=False, only_check_first_element=False))
                 if type is not None:
                     out = _cast_array_to_schema(out, type, allow_primitive_to_str=True, allow_decimal_to_str=True)
                 return out

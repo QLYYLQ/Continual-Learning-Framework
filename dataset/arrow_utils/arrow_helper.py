@@ -1,8 +1,10 @@
-import numpy as np
-from typing import Union, Any
-from functools import partial
-import pyarrow as pa
 import re
+from functools import partial, reduce
+from operator import mul
+from typing import Union, Any, Optional
+
+import numpy as np
+import pyarrow as pa
 import pyarrow.compute as pc
 
 
@@ -393,10 +395,10 @@ def array_cast(
                 if array.null_count > 0:
                     # Ensure each null value in the array translates to [null] * pa_type.list_size in the array's values array
                     array_type = array.type
-                    storage_type = storage_type(array_type)
-                    if array_type != storage_type:
+                    _storage_type = storage_type(array_type)
+                    if array_type != _storage_type:
                         # Temporarily convert to the storage type to support extension types in the slice operation
-                        array = _c(array, storage_type)
+                        array = _c(array, _storage_type)
                         array = pc.list_slice(
                             array, 0, pa_type.list_size, return_fixed_size_list=True
                         )
@@ -483,3 +485,38 @@ def array_cast(
     raise TypeError(
         f"Couldn't cast array of type {short_str(array.type)} to {short_str(pa_type)}"
     )
+
+
+def numpy_to_pyarrow_listarray(arr: np.ndarray, type: pa.DataType = None) -> pa.ListArray:
+    """Build a PyArrow ListArray from a multidimensional NumPy array"""
+    arr = np.array(arr)
+    values = pa.array(arr.flatten(), type=type)
+    for i in range(arr.ndim - 1):
+        n_offsets = reduce(mul, arr.shape[: arr.ndim - i - 1], 1)
+        step_offsets = arr.shape[arr.ndim - i - 1]
+        offsets = pa.array(np.arange(n_offsets + 1) * step_offsets, type=pa.int32())
+        values = pa.ListArray.from_arrays(offsets, values)
+    return values
+
+
+def list_of_pa_arrays_to_pyarrow_list_array(l_arr: list[Optional[pa.Array]]) -> pa.ListArray:
+    null_mask = np.array([arr is None for arr in l_arr])
+    null_indices = np.arange(len(null_mask))[null_mask] - np.arange(np.sum(null_mask))
+    l_arr = [arr for arr in l_arr if arr is not None]
+    offsets = np.cumsum(
+        [0] + [len(arr) for arr in l_arr], dtype=object
+    )  # convert to dtype object to allow None insertion
+    offsets = np.insert(offsets, null_indices, None)
+    offsets = pa.array(offsets, type=pa.int32())
+    values = pa.concat_arrays(l_arr)
+    return pa.ListArray.from_arrays(offsets, values)
+
+
+def list_of_np_array_to_pyarrow_list_array(l_arr: list[np.ndarray], type: pa.DataType = None) -> pa.ListArray:
+    """Build a PyArrow ListArray from a possibly nested list of NumPy arrays"""
+    if len(l_arr) > 0:
+        return list_of_pa_arrays_to_pyarrow_list_array(
+            [numpy_to_pyarrow_listarray(arr, type=type) if arr is not None else None for arr in l_arr]
+        )
+    else:
+        return pa.array([], type=type)
