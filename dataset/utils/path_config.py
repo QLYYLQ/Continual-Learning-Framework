@@ -10,6 +10,8 @@ METADATA_CONFIGS_FIELD = "configs"
 REPO_CARD_FILENAME = "README.md"
 REPO_YAML_FILENAME = ".CLTrainingFramework.yaml"
 
+# Temporary cache directory prefix
+TEMP_CACHE_DIR_PREFIX = "CLTrainingFramework_dataset-"
 MODULE_NAME_FOR_DYNAMIC_MODULES = "datasets_modules"
 
 MAX_DATASET_CONFIG_ID_READABLE_LENGTH = 255

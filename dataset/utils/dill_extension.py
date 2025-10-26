@@ -21,7 +21,7 @@ from types import CodeType, FunctionType
 import dill
 from packaging import version
 
-from . import config
+import CLTrainingFramework.dataset.utils.version_config as config
 
 
 class Pickler(dill.Pickler):

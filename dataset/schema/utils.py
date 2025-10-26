@@ -1,13 +1,16 @@
 import sys
 import warnings
 from io import BytesIO
-from typing import Optional, TypedDict
+from typing import Optional, TypedDict, TYPE_CHECKING
 
 import PIL
 import PIL.Image
 import numpy as np
 
 from CLTrainingFramework.dataset.schema.supported_schema_type import LargeSequence, Sequence
+
+if TYPE_CHECKING:
+    from torchvision.io import VideoReader
 
 
 def _check_non_null_non_empty_recursive(

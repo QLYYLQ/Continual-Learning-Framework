@@ -82,6 +82,13 @@ def no_op_if_value_is_null(func):
 
     return wrapper
 
+def first_non_null_non_empty_value(iterable):
+    """Return the index and the value of the first non-null non-empty value in the iterable. If all values are None or empty, return -1 as index."""
+    for i, value in enumerate(iterable):
+        if value is not None and not (isinstance(value, (dict, list)) and len(value) == 0):
+            return i, value
+    return -1, None
+
 
 class NonMutableDict(dict):
     """Dict where keys can only be added but not modified.
@@ -105,7 +112,7 @@ class NonMutableDict(dict):
             raise ValueError(self._error_msg.format(key=key))
         return super().__setitem__(key, value)
 
-    def update(self, other):
+    def update(self, other, **kwargs):
         if any(k in self for k in other):
             raise ValueError(self._error_msg.format(key=set(self) & set(other)))
-        return super().update(other)
+        return super().update(other,**kwargs)

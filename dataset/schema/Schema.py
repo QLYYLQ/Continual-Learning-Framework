@@ -2,7 +2,7 @@ import copy
 import json
 from dataclasses import fields
 from functools import wraps
-from typing import Union, Any, Optional
+from typing import Union, Any, Optional, Callable
 
 import pyarrow as pa
 
@@ -585,36 +585,46 @@ class Schema(dict):
             for column_name, subfeature in self.items():
                 if isinstance(subfeature, dict):
                     no_change = False
-                    flattened.update(
-                        {f"{column_name}.{k}": v for k, v in subfeature.items()}
-                    )
+                    flattened.update({f"{column_name}.{k}": v for k, v in subfeature.items()})
                     del flattened[column_name]
                 elif isinstance(subfeature, Sequence) and isinstance(
                         subfeature.schema, dict
                 ):
                     no_change = False
-                    flattened.update(
-                        {
-                            f"{column_name}.{k}": Sequence(v)
-                            if not isinstance(v, dict)
-                            else [v]
-                            for k, v in subfeature.schema.items()
-                        }
-                    )
+                    flattened.update({
+                        f"{column_name}.{k}": Sequence(v)
+                        if not isinstance(v, dict)
+                        else [v]
+                        for k, v in subfeature.schema.items()
+                    })
                     del flattened[column_name]
                 elif (
                         hasattr(subfeature, "flatten")
                         and subfeature.flatten() != subfeature
                 ):
                     no_change = False
-                    flattened.update(
-                        {
-                            f"{column_name}.{k}": v
-                            for k, v in subfeature.flatten().items()
-                        }
-                    )
+                    flattened.update({
+                        f"{column_name}.{k}": v
+                        for k, v in subfeature.flatten().items()
+                    })
                     del flattened[column_name]
             self = flattened
             if no_change:
                 break
         return self
+
+
+def map_nested_schema(schema: "SchemaType", func: Callable[[SchemaType], Optional[SchemaType]]) -> "SchemaType":
+    if isinstance(schema, Schema):
+        out = func(Schema({k: map_nested_schema(v, func) for k, v in schema.items()}))
+    elif isinstance(schema, (list, tuple)):
+        out = func([map_nested_schema(schema[0], func)])
+    elif isinstance(schema, LargeSequence):
+        out = func(LargeSequence(map_nested_schema(schema.schema, func)))
+    elif isinstance(schema, dict):
+        out = func({k: map_nested_schema(v, func) for k, v in schema.items()})
+    elif isinstance(schema, Sequence):
+        out = func(Sequence(map_nested_schema(schema.schema, func), length=schema.length))
+    else:
+        out = func(schema)
+    return schema if out is None else out

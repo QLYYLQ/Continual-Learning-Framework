@@ -96,6 +96,10 @@ class Table(IndexPlugin):
         return self.table.columns
 
     @property
+    def schema(self):
+        return self.table.schema
+
+    @property
     def num_columns(self):
         return self.table.num_columns
 
