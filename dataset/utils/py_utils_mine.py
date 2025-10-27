@@ -89,6 +89,12 @@ def first_non_null_non_empty_value(iterable):
             return i, value
     return -1, None
 
+def first_non_null_value(iterable):
+    """Return the index and the value of the first non-null value in the iterable. If all values are None, return -1 as index."""
+    for i, value in enumerate(iterable):
+        if value is not None:
+            return i, value
+    return -1, None
 
 class NonMutableDict(dict):
     """Dict where keys can only be added but not modified.

@@ -29,20 +29,15 @@ import CLTrainingFramework.dataset.utils.dataset_config as dataset_config
 import CLTrainingFramework.dataset.utils.package_config as package_config
 from CLTrainingFramework.dataset.arrow_handler.arrow_dataset.dataset_info import DatasetInfo
 from CLTrainingFramework.dataset.arrow_handler.arrow_table.utils import array_cast, _cast_array_to_schema, table_cast
-from CLTrainingFramework.dataset.arrow_utils import _ArrayXDExtensionType
-from CLTrainingFramework.dataset.schema import Audio, Schema, Image, Pdf, Value, Video, map_nested_schema, SchemaType, \
-    pyarrow_to_schema, schema_to_pyarrow
-from CLTrainingFramework.dataset.schema.wirte_file import prepare_for_storage
+from CLTrainingFramework.dataset.arrow_utils import _ArrayXDExtensionType, list_of_np_array_to_pyarrow_list_array, \
+    numpy_to_pyarrow_list_array, to_pyarrow_list_array
+from CLTrainingFramework.dataset.schema import Schema, Image, Value, Video, map_nested_schema, SchemaType, \
+    pyarrow_to_schema, schema_to_pyarrow, prepare_for_storage
 from CLTrainingFramework.dataset.utils import logging
+from CLTrainingFramework.dataset.utils.py_utils_mine import as_dict, first_non_null_non_empty_value
 from .filesystems import is_remote_filesystem
-from .keyhash import DuplicatedKeysError, KeyHasher
+from CLTrainingFramework.dataset.arrow_handler.utils import DuplicatedKeysError, KeyHasher
 from .table import embed_table_storage
-from ..features import (
-    list_of_np_array_to_pyarrow_listarray,
-    numpy_to_pyarrow_listarray,
-    to_pyarrow_listarray,
-)
-from ..utils.py_utils_mine import as_dict, first_non_null_non_empty_value
 
 logger = logging.get_logger(__name__)
 
@@ -76,8 +71,8 @@ def get_writer_batch_size(schema: Optional[Schema]) -> Optional[int]:
         nonlocal batch_size
         if isinstance(feature, Image):
             batch_size = min(batch_size, dataset_config.PARQUET_ROW_GROUP_SIZE_FOR_IMAGE_DATASETS)
-        elif isinstance(feature, Audio):
-            batch_size = min(batch_size, dataset_config.PARQUET_ROW_GROUP_SIZE_FOR_AUDIO_DATASETS)
+        # elif isinstance(feature, Audio):
+        #     batch_size = min(batch_size, dataset_config.PARQUET_ROW_GROUP_SIZE_FOR_AUDIO_DATASETS)
         elif isinstance(feature, Video):
             batch_size = min(batch_size, dataset_config.PARQUET_ROW_GROUP_SIZE_FOR_VIDEO_DATASETS)
         elif isinstance(feature, Value) and feature.dtype == "binary":
@@ -229,17 +224,17 @@ class TypedSequence:
         try:
             # custom pyarrow types
             if isinstance(pa_type, _ArrayXDExtensionType):
-                storage = to_pyarrow_listarray(data, pa_type)
+                storage = to_pyarrow_list_array(data, pa_type)
                 return pa.ExtensionArray.from_storage(pa_type, storage)
 
             # efficient np array to pyarrow array
             if isinstance(data, np.ndarray):
-                out = numpy_to_pyarrow_listarray(data)
+                out = numpy_to_pyarrow_list_array(data)
             elif isinstance(data, list) and data and isinstance(first_non_null_non_empty_value(data)[1], np.ndarray):
-                out = list_of_np_array_to_pyarrow_listarray(data)
+                out = list_of_np_array_to_pyarrow_list_array(data)
             else:
                 trying_cast_to_python_objects = True
-                out = pa.array(prepare_for_storage(data, only_check_first_element=True))
+                out = pa.array(prepare_for_storage(data, keep_dim=False))
             # use smaller integer precisions if possible
             if self.trying_int_optimization:
                 if pa.types.is_int64(out.type):
@@ -270,12 +265,12 @@ class TypedSequence:
             if self.trying_type:
                 try:  # second chance
                     if isinstance(data, np.ndarray):
-                        return numpy_to_pyarrow_listarray(data)
+                        return numpy_to_pyarrow_list_array(data)
                     elif isinstance(data, list) and data and any(isinstance(value, np.ndarray) for value in data):
-                        return list_of_np_array_to_pyarrow_listarray(data)
+                        return list_of_np_array_to_pyarrow_list_array(data)
                     else:
                         trying_cast_to_python_objects = True
-                        return pa.array(prepare_for_storage(data, only_check_first_element=True))
+                        return pa.array(prepare_for_storage(data, keep_dim=False))
                 except pa.lib.ArrowInvalid as e:
                     if "overflow" in str(e):
                         raise OverflowError(
@@ -345,7 +340,7 @@ class ArrowWriter:
     def __init__(
             self,
             schema: Optional[pa.Schema] = None,
-            features: Optional[Features] = None,
+            features: Optional[Schema] = None,
             path: Optional[str] = None,
             stream: Optional[pa.NativeFile] = None,
             fingerprint: Optional[str] = None,
@@ -366,7 +361,7 @@ class ArrowWriter:
             self._schema = None
         elif schema is not None:
             self._schema: pa.Schema = schema
-            self._features = Features.from_arrow_schema(self._schema)
+            self._features = Schema.from_arrow_schema(self._schema)
         else:
             self._features = None
             self._schema = None
@@ -431,7 +426,7 @@ class ArrowWriter:
 
     def _build_writer(self, inferred_schema: pa.Schema):
         schema = self.schema
-        inferred_features = Features.from_arrow_schema(inferred_schema)
+        inferred_features = Schema.from_arrow_schema(inferred_schema)
         if self._features is not None:
             if self.update_features:  # keep original features it they match, or update them
                 fields = {field.name: field for field in self._features.type}
@@ -598,7 +593,7 @@ class ArrowWriter:
         features = None if self.pa_writer is None and self.update_features else self._features
         try_features = self._features if self.pa_writer is None and self.update_features else None
         arrays = []
-        inferred_features = Features()
+        inferred_features = Schema()
         # preserve the order the columns
         if self.schema:
             schema_cols = set(self.schema.names)
@@ -614,7 +609,7 @@ class ArrowWriter:
             if isinstance(col_values, (pa.Array, pa.ChunkedArray)):
                 array = _cast_array_to_schema(col_values, col_type) if col_type is not None else col_values
                 arrays.append(array)
-                inferred_features[col] = generate_from_arrow_type(col_values.type)
+                inferred_features[col] = pyarrow_to_schema(col_values.type)
             else:
                 col_try_type = (
                     try_features[col]

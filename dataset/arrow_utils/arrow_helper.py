@@ -1,11 +1,16 @@
 import re
 from functools import partial, reduce
 from operator import mul
-from typing import Union, Any, Optional
+from typing import Union, Any, Optional, TYPE_CHECKING
 
 import numpy as np
 import pyarrow as pa
 import pyarrow.compute as pc
+
+from CLTrainingFramework.dataset.utils.py_utils_mine import first_non_null_value
+
+if TYPE_CHECKING:
+    from CLTrainingFramework.dataset.arrow_utils.arrow_array_type import _ArrayXDExtensionType
 
 
 def arrow_type_to_framework_string_dtype(arrow_type: pa.DataType) -> str:
@@ -487,7 +492,56 @@ def array_cast(
     )
 
 
-def numpy_to_pyarrow_listarray(arr: np.ndarray, type: pa.DataType = None) -> pa.ListArray:
+def contains_any_np_array(data: Any):
+    """Return `True` if data is a NumPy ndarray or (recursively) if first non-null value in list is a NumPy ndarray.
+
+    Args:
+        data (Any): Data.
+
+    Returns:
+        bool
+    """
+    if isinstance(data, np.ndarray):
+        return True
+    elif isinstance(data, list):
+        return contains_any_np_array(first_non_null_value(data)[1])
+    else:
+        return False
+
+
+def any_np_array_to_pyarrow_list_array(data: Union[np.ndarray, list], type: pa.DataType = None) -> pa.ListArray:
+    """Convert to PyArrow ListArray either a NumPy ndarray or (recursively) a list that may contain any NumPy ndarray.
+
+    Args:
+        data (Union[np.ndarray, List]): Data.
+        type (pa.DataType): Explicit PyArrow DataType passed to coerce the ListArray data type.
+
+    Returns:
+        pa.ListArray
+    """
+    if isinstance(data, np.ndarray):
+        return numpy_to_pyarrow_list_array(data, type=type)
+    elif isinstance(data, list):
+        return list_of_pa_arrays_to_pyarrow_list_array([any_np_array_to_pyarrow_list_array(i, type=type) for i in data])
+
+
+def to_pyarrow_list_array(data: Any, pa_type: _ArrayXDExtensionType) -> pa.Array:
+    """Convert to PyArrow ListArray.
+
+    Args:
+        data (Any): Sequence, iterable, np.ndarray or pd.Series.
+        pa_type (_ArrayXDExtensionType): Any of the ArrayNDExtensionType.
+
+    Returns:
+        pyarrow.Array
+    """
+    if contains_any_np_array(data):
+        return any_np_array_to_pyarrow_list_array(data, type=pa_type.value_type)
+    else:
+        return pa.array(data, pa_type.storage_dtype)
+
+
+def numpy_to_pyarrow_list_array(arr: np.ndarray, type: pa.DataType = None) -> pa.ListArray:
     """Build a PyArrow ListArray from a multidimensional NumPy array"""
     arr = np.array(arr)
     values = pa.array(arr.flatten(), type=type)
@@ -516,7 +570,14 @@ def list_of_np_array_to_pyarrow_list_array(l_arr: list[np.ndarray], type: pa.Dat
     """Build a PyArrow ListArray from a possibly nested list of NumPy arrays"""
     if len(l_arr) > 0:
         return list_of_pa_arrays_to_pyarrow_list_array(
-            [numpy_to_pyarrow_listarray(arr, type=type) if arr is not None else None for arr in l_arr]
+            [numpy_to_pyarrow_list_array(arr, type=type) if arr is not None else None for arr in l_arr]
         )
     else:
         return pa.array([], type=type)
+
+def add_external_data_into_table(pa_table:pa.Table):
+    from CLTrainingFramework.dataset.schema import Schema
+    schema = Schema.from_arrow_schema(pa_table.schema)
+    arrays = [
+
+    ]

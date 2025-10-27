@@ -8,7 +8,7 @@ from CLTrainingFramework.dataset.schema.utils import _check_non_null_non_empty_r
 
 
 def prepare_for_storage(
-        obj: Any, keep_dim: bool = False, only_check_first_element: bool = True
+        obj: Any, keep_dim: bool = True, only_check_first_element: bool = True
 ) -> Any:
     """
     Args:
@@ -26,7 +26,7 @@ def prepare_for_storage(
 
 
 def _column_object_to_python_object(
-        obj: Any, keep_dim: bool = False, only_check_first_element: bool = True
+        obj: Any, keep_dim: bool = True, only_check_first_element: bool = True
 ) -> Any:
     import torch, PIL.Image
     import numpy as np
@@ -34,7 +34,7 @@ def _column_object_to_python_object(
     if isinstance(obj, np.ndarray):
         if obj.ndim == 0:
             return obj[()]
-        elif not keep_dim or obj.ndim == 1:
+        elif keep_dim or obj.ndim == 1:
             return obj
         else:
             return (
@@ -341,7 +341,7 @@ if __name__ == "__main__":
     a = _column_object_to_python_object(array1)
     b = _column_object_to_python_object(array2)
     c = _column_object_to_python_object(array3)
-    print(a)
+    print(a,type(a))
     print(b)
     print(c)
     import torch
@@ -354,7 +354,7 @@ if __name__ == "__main__":
     b = prepare_for_storage(tensor2)
     c = prepare_for_storage(tensor3)
     d = prepare_for_storage(tensor4)
-    print(a)
+    print(a,type(a))
     print(b)
     print(c)
     print(d)

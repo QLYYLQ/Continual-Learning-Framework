@@ -1,14 +1,3 @@
-from CLTrainingFramework.dataset.arrow_utils.arrow_helper import (
-    arrow_type_to_framework_string_dtype,
-    str_to_arrow_type,
-    _is_zero_copy_only,
-    storage_type,
-    combine_list_array_offsets_with_mask,
-    check_sub_list_length_for_ListArray,
-    wrap_for_chunked_arrays,
-    combine_list_array_offsets_with_mask,
-    short_str,
-    array_cast)
 from CLTrainingFramework.dataset.arrow_utils.arrow_array_type import (
     Array2D,
     Array3D,
@@ -19,6 +8,21 @@ from CLTrainingFramework.dataset.arrow_utils.arrow_array_type import (
     Array4DExtensionType,
     Array5DExtensionType,
     _ArrayXDExtensionType,
+)
+from CLTrainingFramework.dataset.arrow_utils.arrow_helper import (
+    arrow_type_to_framework_string_dtype,
+    str_to_arrow_type,
+    _is_zero_copy_only,
+    storage_type,
+    combine_list_array_offsets_with_mask,
+    check_sub_list_length_for_ListArray,
+    wrap_for_chunked_arrays,
+    combine_list_array_offsets_with_mask,
+    short_str,
+    array_cast,
+    list_of_np_array_to_pyarrow_list_array,
+    numpy_to_pyarrow_list_array,
+    to_pyarrow_list_array,
 )
 
 __all__ = [
@@ -41,4 +45,7 @@ __all__ = [
     "Array4DExtensionType",
     "Array5DExtensionType",
     "_ArrayXDExtensionType",
+    "list_of_np_array_to_pyarrow_list_array",
+    "numpy_to_pyarrow_list_array",
+    "to_pyarrow_list_array",
 ]

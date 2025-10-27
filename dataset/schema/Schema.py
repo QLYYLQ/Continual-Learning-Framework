@@ -628,3 +628,14 @@ def map_nested_schema(schema: "SchemaType", func: Callable[[SchemaType], Optiona
     else:
         out = func(schema)
     return schema if out is None else out
+
+
+def check_embed_storage_for_schema(schema:SchemaType)->bool:
+    if isinstance(schema,dict):
+        return any(check_embed_storage_for_schema(v) for v in schema.values())
+    elif isinstance(schema,(list,tuple)):
+        return check_embed_storage_for_schema(schema[0])
+    elif isinstance(schema,( LargeSequence ,Sequence)):
+        return check_embed_storage_for_schema(schema.schema)
+    else:
+        return hasattr(schema,"embed_storage")
