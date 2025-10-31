@@ -7,10 +7,10 @@ import pyarrow as pa
 from CLTrainingFramework.dataset.arrow_handler.arrow_table.block_table import Table, BlockTable, MemoryTable
 from CLTrainingFramework.dataset.arrow_handler.arrow_table.utils import table_flatten, table_cast, concat_for_pyarrow, \
     pyarrow_table_from_grid, merge_specific_table_type_from_blocks
-from CLTrainingFramework.dataset.arrow_utils import short_str, wrap_for_chunked_arrays
+from CLTrainingFramework.dataset.arrow_utils import short_str
 
 if TYPE_CHECKING:
-    from CLTrainingFramework.dataset.schema import SchemaType
+    pass
 
 _T_Table = TypeVar("_T_Table", BlockTable, list[BlockTable], list[list[BlockTable]])
 
@@ -447,10 +447,6 @@ def concat_tables(tables: list[Table], axis: int = 0) -> Table:
     if len(tables) == 1:
         return tables[0]
     return ConcatenationTable.from_tables(tables, axis=axis)
-@wrap_for_chunked_arrays
-def for_storage(array:pa.Array,schema:"SchemaType"):
-    from CLTrainingFramework.dataset.schema import Sequence
-    _e = for_storage
 
 
 if __name__ == '__main__':

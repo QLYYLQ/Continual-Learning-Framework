@@ -97,8 +97,8 @@ def _cast_array_to_schema(
 
     if isinstance(array, pa.ExtensionArray):
         array = array.storage
-    if hasattr(_schema, "cast_storage"):
-        return _schema.cast_storage(array)
+    if hasattr(_schema, "prepare_for_arrow_storage"):
+        return _schema.prepare_for_arrow_storage(array)
 
     elif pa.types.is_struct(array.type):
         # feature must be a dict or Sequence(subfeatures_dict)

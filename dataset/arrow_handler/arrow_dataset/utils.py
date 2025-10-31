@@ -7,10 +7,11 @@ from collections import Counter
 from pathlib import Path
 from typing import Optional
 
-from CLTrainingFramework.dataset.arrow_handler.arrow_table import Table, MemoryTable
-from CLTrainingFramework.dataset.arrow_handler.arrow_dataset.dataset_info import DatasetInfo
 import pyarrow as pa
 
+from CLTrainingFramework.dataset.arrow_handler.arrow_dataset.dataset_info import DatasetInfo
+from CLTrainingFramework.dataset.arrow_handler.arrow_table import Table, MemoryTable
+from CLTrainingFramework.dataset.arrow_handler.arrow_writer import ArrowWriter
 from CLTrainingFramework.dataset.schema import Schema
 from CLTrainingFramework.dataset.utils import path_config
 from CLTrainingFramework.dataset.utils.py_utils_mine import as_dict
@@ -70,11 +71,13 @@ def register_dataset_for_no_cache(dataset):
     if _DATASETS_WITH_TABLE_IN_TEMP_DIR is None:
         _DATASETS_WITH_TABLE_IN_TEMP_DIR = weakref.WeakSet()
     if any(
-        Path(_NOT_CACHE_FILES.name) in Path(i["filename"]).parents
-        for i in dataset.cache_files
+            Path(_NOT_CACHE_FILES.name) in Path(i["filename"]).parents
+            for i in dataset.cache_files
     ):
         _DATASETS_WITH_TABLE_IN_TEMP_DIR.add(dataset)
-#-------------------------
+
+
+# -------------------------
 
 def _check_column_names(column_names: list[str]):
     """Check the column names to make sure they don't contain duplicates."""
@@ -82,6 +85,7 @@ def _check_column_names(column_names: list[str]):
     if not all(count == 1 for count in counter.values()):
         duplicated_columns = [col for col in counter if counter[col] > 1]
         raise ValueError(f"The table can't have duplicated columns but columns {duplicated_columns} are duplicated.")
+
 
 def update_metadata_with_schema(table: Table, features: Schema):
     """

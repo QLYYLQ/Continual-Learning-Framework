@@ -7,6 +7,7 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.compute as pc
 
+from CLTrainingFramework.dataset.schema import SchemaType
 from CLTrainingFramework.dataset.utils.py_utils_mine import first_non_null_value
 
 if TYPE_CHECKING:
@@ -581,3 +582,47 @@ def add_external_data_into_table(pa_table:pa.Table):
     arrays = [
 
     ]
+
+
+@wrap_for_chunked_arrays
+def for_storage(array: pa.Array, schema: "SchemaType"):
+    from CLTrainingFramework.dataset.schema import Sequence
+    _e = for_storage
+
+    if isinstance(array, pa.ExtensionArray):
+        array = array.storage
+    if hasattr(schema, "embed_storage"):
+        return schema.embed_storage(array)
+    elif pa.types.is_struct(array.type):
+        # feature must be a dict or Sequence(subfeatures_dict)
+        if isinstance(schema, Sequence) and isinstance(schema.schema, dict):
+            feature = {
+                name: Sequence(subfeature, length=schema.length) for name, subfeature in schema.schema.items()
+            }
+        if isinstance(schema, dict):
+            arrays = [_e(array.field(name), subfeature) for name, subfeature in feature.items()]
+            return pa.StructArray.from_arrays(arrays, names=list(feature), mask=array.is_null())
+    elif pa.types.is_list(array.type):
+        # feature must be either [subfeature] or Sequence(subfeature)
+        # Merge offsets with the null bitmap to avoid the "Null bitmap with offsets slice not supported" ArrowNotImplementedError
+        array_offsets = combine_list_array_offsets_with_mask(array)
+        if isinstance(schema, list):
+            return pa.ListArray.from_arrays(array_offsets, _e(array.values, schema[0]))
+        if isinstance(schema, Sequence) and schema.length == -1:
+            return pa.ListArray.from_arrays(array_offsets, _e(array.values, schema.schema))
+    elif pa.types.is_large_list(array.type):
+        # feature must be LargeList(subfeature)
+        # Merge offsets with the null bitmap to avoid the "Null bitmap with offsets slice not supported" ArrowNotImplementedError
+        array_offsets = combine_list_array_offsets_with_mask(array)
+        return pa.LargeListArray.from_arrays(array_offsets, _e(array.values, schema.schema))
+    elif pa.types.is_fixed_size_list(array.type):
+        # feature must be Sequence(subfeature)
+        if isinstance(schema, Sequence) and schema.length > -1:
+            array_values = array.values[
+                           array.offset * array.type.list_size: (array.offset + len(array)) * array.type.list_size
+                           ]
+            embedded_array_values = _e(array_values, schema.schema)
+            return pa.FixedSizeListArray.from_arrays(embedded_array_values, schema.length, mask=array.is_null())
+    if not isinstance(schema, (Sequence, dict, list, tuple)):
+        return array
+    raise TypeError(f"Couldn't embed array of type\n{short_str(array.type)}\nwith\n{short_str(schema)}")

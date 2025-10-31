@@ -23,6 +23,7 @@ from CLTrainingFramework.dataset.arrow_utils.arrow_helper import (
     list_of_np_array_to_pyarrow_list_array,
     numpy_to_pyarrow_list_array,
     to_pyarrow_list_array,
+    for_storage,
 )
 
 __all__ = [
@@ -48,4 +49,5 @@ __all__ = [
     "list_of_np_array_to_pyarrow_list_array",
     "numpy_to_pyarrow_list_array",
     "to_pyarrow_list_array",
+    "for_storage",
 ]

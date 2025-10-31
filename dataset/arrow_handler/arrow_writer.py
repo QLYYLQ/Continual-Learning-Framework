@@ -28,16 +28,15 @@ from fsspec.core import url_to_fs
 import CLTrainingFramework.dataset.utils.dataset_config as dataset_config
 import CLTrainingFramework.dataset.utils.package_config as package_config
 from CLTrainingFramework.dataset.arrow_handler.arrow_dataset.dataset_info import DatasetInfo
-from CLTrainingFramework.dataset.arrow_handler.arrow_table.utils import array_cast, _cast_array_to_schema, table_cast
+from CLTrainingFramework.dataset.arrow_handler.arrow_table.utils import  _cast_array_to_schema, table_cast
+from CLTrainingFramework.dataset.arrow_handler.utils import DuplicatedKeysError, KeyHasher
 from CLTrainingFramework.dataset.arrow_utils import _ArrayXDExtensionType, list_of_np_array_to_pyarrow_list_array, \
-    numpy_to_pyarrow_list_array, to_pyarrow_list_array
+    numpy_to_pyarrow_list_array, to_pyarrow_list_array,for_storage,array_cast
 from CLTrainingFramework.dataset.schema import Schema, Image, Value, Video, map_nested_schema, SchemaType, \
     pyarrow_to_schema, schema_to_pyarrow, prepare_for_storage
 from CLTrainingFramework.dataset.utils import logging
 from CLTrainingFramework.dataset.utils.py_utils_mine import as_dict, first_non_null_non_empty_value
-from .filesystems import is_remote_filesystem
-from CLTrainingFramework.dataset.arrow_handler.utils import DuplicatedKeysError, KeyHasher
-from .table import embed_table_storage
+from CLTrainingFramework.utils.filesystem import is_remote_filesystem
 
 logger = logging.get_logger(__name__)
 
@@ -47,7 +46,7 @@ type_ = type  # keep python's type function
 def get_writer_batch_size(schema: Optional[Schema]) -> Optional[int]:
     """
     Get the writer_batch_size that defines the maximum row group size in the parquet files.
-    The default in `datasets` is 1,000 but we lower it to 100 for image/audio datasets and 10 for videos.
+    The default in `datasets` is 1,000, but we lower it to 100 for image/audio datasets and 10 for videos.
     This allows to optimize random access to parquet file, since accessing 1 row requires
     to read its entire row group.
 
@@ -160,15 +159,16 @@ class TypedSequence:
             SchemaType: inferred feature type of the sequence.
         """
         if self._inferred_type is None:
+            # https://arrow.apache.org/docs/python/generated/pyarrow.array.html#pyarrow.array
             self._inferred_type = pyarrow_to_schema(pa.array(self).type)
         return self._inferred_type
 
     @staticmethod
-    def _infer_custom_type_and_encode(data: Iterable) -> tuple[Iterable, Optional[SchemaType]]:
+    def _infer_custom_type_and_to_storage(data: Iterable) -> tuple[Iterable, Optional[SchemaType]]:
         """Implement type inference for custom objects like PIL.Image.Image -> Image type.
 
         This function is only used for custom python objects that can't be directly passed to build
-        an Arrow array. In such cases is infers the feature type to use, and it encodes the data so
+        an Arrow array. In such cases is infer the feature type to use, and it encodes the data so
         that they can be passed to an Arrow array.
 
         Args:
@@ -185,9 +185,10 @@ class TypedSequence:
 
             non_null_idx, non_null_value = first_non_null_non_empty_value(data)
             if isinstance(non_null_value, PIL.Image.Image):
-                return [Image().encode_example(value) if value is not None else None for value in data], Image()
+                return [Image().sample_to_storage(value) if value is not None else None for value in data], Image()
             if isinstance(non_null_value, list) and isinstance(non_null_value[0], PIL.Image.Image):
-                return [[Image().encode_example(x) for x in value] if value is not None else None for value in data], [
+                return [[Image().sample_to_storage(x) for x in value] if value is not None else None for value in
+                        data], [
                     Image()
                 ]
         # if config.PDFPLUMBER_AVAILABLE and "pdfplumber" in sys.modules:
@@ -203,7 +204,11 @@ class TypedSequence:
         return data, None
 
     def __arrow_array__(self, type: Optional[pa.DataType] = None):
-        """This function is called when calling pa.array(typed_sequence)"""
+        """
+        This function is called when calling pa.array(typed_sequence)
+
+        看不懂思密达，直接抄了
+        """
 
         if type is not None:
             raise ValueError("TypedSequence is supposed to be used with pa.array(typed_sequence, type=None)")
@@ -211,7 +216,7 @@ class TypedSequence:
         data = self.data
         # automatic type inference for custom objects
         if self.type is None and self.try_type is None:
-            data, self._inferred_type = self._infer_custom_type_and_encode(data)
+            data, self._inferred_type = self._infer_custom_type_and_to_storage(data)
         if self._inferred_type is None:
             type = self.try_type if self.trying_type else self.type
         else:
@@ -339,8 +344,8 @@ class ArrowWriter:
 
     def __init__(
             self,
-            schema: Optional[pa.Schema] = None,
-            features: Optional[Schema] = None,
+            pa_schema: Optional[pa.Schema] = None,
+            schema: Optional[Schema] = None,
             path: Optional[str] = None,
             stream: Optional[pa.NativeFile] = None,
             fingerprint: Optional[str] = None,
@@ -356,21 +361,21 @@ class ArrowWriter:
     ):
         if path is None and stream is None:
             raise ValueError("At least one of path and stream must be provided.")
-        if features is not None:
-            self._features = features
-            self._schema = None
-        elif schema is not None:
-            self._schema: pa.Schema = schema
-            self._features = Schema.from_arrow_schema(self._schema)
+        if schema is not None:
+            self._schema = schema
+            self._pa_schema = None
+        elif pa_schema is not None:
+            self._pa_schema: pa.Schema = pa_schema
+            self._schema = Schema.from_arrow_schema(self._pa_schema)
         else:
-            self._features = None
             self._schema = None
+            self._pa_schema = None
 
         if hash_salt is not None:
             # Create KeyHasher instance using split name as hash salt
             self._hasher = KeyHasher(hash_salt)
         else:
-            self._hasher = KeyHasher("")
+            self._hasher = KeyHasher("Framework_salt")
 
         self._check_duplicates = check_duplicates
         self._disable_nullable = disable_nullable
@@ -390,7 +395,7 @@ class ArrowWriter:
         self.fingerprint = fingerprint
         self.disable_nullable = disable_nullable
         self.writer_batch_size = (
-                writer_batch_size or get_writer_batch_size(self._features) or dataset_config.DEFAULT_MAX_BATCH_SIZE
+                writer_batch_size or get_writer_batch_size(self._schema) or dataset_config.DEFAULT_MAX_BATCH_SIZE
         )
         self.update_features = update_features
         self.with_metadata = with_metadata
@@ -427,34 +432,34 @@ class ArrowWriter:
     def _build_writer(self, inferred_schema: pa.Schema):
         schema = self.schema
         inferred_features = Schema.from_arrow_schema(inferred_schema)
-        if self._features is not None:
-            if self.update_features:  # keep original features it they match, or update them
-                fields = {field.name: field for field in self._features.type}
+        if self._schema is not None:
+            if self.update_features:  # keep original features if they match, or update them
+                fields = {field.name: field for field in self._schema.type}
                 for inferred_field in inferred_features.type:
                     name = inferred_field.name
                     if name in fields:
                         if inferred_field == fields[name]:
-                            inferred_features[name] = self._features[name]
-                self._features = inferred_features
+                            inferred_features[name] = self._schema[name]
+                self._schema = inferred_features
                 schema: pa.Schema = inferred_schema
         else:
-            self._features = inferred_features
+            self._schema = inferred_features
             schema: pa.Schema = inferred_features.arrow_schema
         if self.disable_nullable:
             schema = pa.schema(pa.field(field.name, field.type, nullable=False) for field in schema)
         if self.with_metadata:
-            schema = schema.with_metadata(self._build_metadata(DatasetInfo(schema=self._features), self.fingerprint))
+            schema = schema.with_metadata(self._build_metadata(DatasetInfo(schema=self._schema), self.fingerprint))
         else:
             schema = schema.with_metadata({})
-        self._schema = schema
+        self._pa_schema = schema
         self.pa_writer = self._WRITER_CLASS(self.stream, schema)
 
     @property
     def schema(self):
         _schema = (
-            self._schema
-            if self._schema is not None
-            else (pa.schema(self._features.type) if self._features is not None else None)
+            self._pa_schema
+            if self._pa_schema is not None
+            else (pa.schema(self._schema.type) if self._schema is not None else None)
         )
         if self._disable_nullable and _schema is not None:
             _schema = pa.schema(pa.field(field.name, field.type, nullable=False) for field in _schema)
@@ -462,13 +467,13 @@ class ArrowWriter:
 
     @staticmethod
     def _build_metadata(info: DatasetInfo, fingerprint: Optional[str] = None) -> dict[str, str]:
-        info_keys = ["features"]  # we can add support for more DatasetInfo keys in the future
+        info_keys = ["schema"]  # we can add support for more DatasetInfo keys in the future
         info_as_dict = as_dict(info)
         metadata = {}
         metadata["info"] = {key: info_as_dict[key] for key in info_keys}
         if fingerprint is not None:
             metadata["fingerprint"] = fingerprint
-        return {"huggingface": json.dumps(metadata)}
+        return {"CLTrainingFramework": json.dumps(metadata)}
 
     def write_examples_on_file(self):
         """Write stored examples from the write-pool of examples. It makes a table out of the examples and write it."""
@@ -590,8 +595,8 @@ class ArrowWriter:
         """
         if batch_examples and len(next(iter(batch_examples.values()))) == 0:
             return
-        features = None if self.pa_writer is None and self.update_features else self._features
-        try_features = self._features if self.pa_writer is None and self.update_features else None
+        features = None if self.pa_writer is None and self.update_features else self._schema
+        try_features = self._schema if self.pa_writer is None and self.update_features else None
         arrays = []
         inferred_features = Schema()
         # preserve the order the columns
@@ -634,9 +639,9 @@ class ArrowWriter:
         if self.pa_writer is None:
             self._build_writer(inferred_schema=pa_table.schema)
         pa_table = pa_table.combine_chunks()
-        pa_table = table_cast(pa_table, self._schema)
+        pa_table = table_cast(pa_table, self._pa_schema)
         if self.embed_local_files:
-            pa_table = embed_table_storage(pa_table)
+            pa_table = for_storage(pa_table)
         self._num_bytes += pa_table.nbytes
         self._num_examples += pa_table.num_rows
         self.pa_writer.write_table(pa_table, writer_batch_size)
