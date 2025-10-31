@@ -11,7 +11,7 @@ from fsspec.core import url_to_fs
 from CLTrainingFramework.dataset.arrow_handler.arrow_dataset.dataset_splits import SplitDict
 from CLTrainingFramework.dataset.schema import Schema
 from CLTrainingFramework.dataset.utils import path_config
-from CLTrainingFramework.dataset.utils.logging import get_logger
+from CLTrainingFramework.utils.logging import get_logger
 from CLTrainingFramework.dataset.utils.py_utils_mine import as_dict, unique_values
 from CLTrainingFramework.dataset.utils.version_helper import Version
 

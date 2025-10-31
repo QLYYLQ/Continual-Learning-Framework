@@ -67,12 +67,6 @@ def zip_dict(*dicts):
         yield k, tuple(d[k] for d in dicts)
 
 
-if __name__ == "__main__":
-    schema = {"id": "int64", "audio": "Audio", "image": "Image"}
-    obj = {"id": [12, 23], "audio": "path/to/file.wav", "image": "path/to/image.jpg"}
-    iterator = zip_dict(schema, obj)
-    print(list(iterator))
-
 
 def no_op_if_value_is_null(func):
     """If the value is None, return None, else call `func`."""

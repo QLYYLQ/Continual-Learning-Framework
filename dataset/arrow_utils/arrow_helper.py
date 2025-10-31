@@ -585,9 +585,9 @@ def add_external_data_into_table(pa_table:pa.Table):
 
 
 @wrap_for_chunked_arrays
-def for_storage(array: pa.Array, schema: "SchemaType"):
+def embed_local_file_to_cache(array: pa.Array, schema: "SchemaType"):
     from CLTrainingFramework.dataset.schema import Sequence
-    _e = for_storage
+    _e = embed_local_file_to_cache
 
     if isinstance(array, pa.ExtensionArray):
         array = array.storage

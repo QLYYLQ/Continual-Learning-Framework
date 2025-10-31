@@ -3,7 +3,7 @@ from typing import NamedTuple, Union
 
 import numpy as np
 
-from CLTrainingFramework.dataset.utils.logging import get_logger
+from CLTrainingFramework.utils.logging import get_logger
 
 
 class MissingIndex(Exception):

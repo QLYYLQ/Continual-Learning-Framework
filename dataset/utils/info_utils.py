@@ -13,7 +13,7 @@ from .exceptions import (
     UnexpectedDownloadedFileError,
     UnexpectedSplitsError,
 )
-from .logging import get_logger
+from CLTrainingFramework.utils.logging import get_logger
 
 
 logger = get_logger(__name__)

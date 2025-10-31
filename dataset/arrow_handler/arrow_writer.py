@@ -28,13 +28,13 @@ from fsspec.core import url_to_fs
 import CLTrainingFramework.dataset.utils.dataset_config as dataset_config
 import CLTrainingFramework.dataset.utils.package_config as package_config
 from CLTrainingFramework.dataset.arrow_handler.arrow_dataset.dataset_info import DatasetInfo
-from CLTrainingFramework.dataset.arrow_handler.arrow_table.utils import  cast_pa_array_using_schema, pa_table_cast
+from CLTrainingFramework.dataset.arrow_handler.arrow_table.utils import cast_pa_array_using_schema, pa_table_cast
 from CLTrainingFramework.dataset.arrow_handler.utils import DuplicatedKeysError, KeyHasher
 from CLTrainingFramework.dataset.arrow_utils import _ArrayXDExtensionType, list_of_np_array_to_pyarrow_list_array, \
-    numpy_to_pyarrow_list_array, to_pyarrow_list_array,for_storage,array_cast
+    numpy_to_pyarrow_list_array, to_pyarrow_list_array, embed_local_file_to_cache, array_cast
 from CLTrainingFramework.dataset.schema import Schema, Image, Value, Video, map_nested_schema, SchemaType, \
     pyarrow_to_schema, schema_to_pyarrow, prepare_for_pa_cache
-from CLTrainingFramework.dataset.utils import logging
+from CLTrainingFramework.utils import logging
 from CLTrainingFramework.dataset.utils.py_utils_mine import as_dict, first_non_null_non_empty_value
 from CLTrainingFramework.utils.filesystem import is_remote_filesystem
 
@@ -404,14 +404,14 @@ class ArrowWriter:
 
         self._num_examples = 0
         self._num_bytes = 0
-        self.current_examples: list[tuple[dict[str, Any], str]] = []
+        self.current_samples: list[tuple[dict[str, Any], str]] = []
         self.current_rows: list[pa.Table] = []
         self.pa_writer: Optional[pa.RecordBatchStreamWriter] = None
         self.hkey_record = []
 
     def __len__(self):
         """Return the number of writed and staged examples"""
-        return self._num_examples + len(self.current_examples) + len(self.current_rows)
+        return self._num_examples + len(self.current_samples) + len(self.current_rows)
 
     def __enter__(self):
         return self
@@ -431,20 +431,20 @@ class ArrowWriter:
 
     def _build_writer(self, inferred_schema: pa.Schema):
         schema = self.schema
-        inferred_features = Schema.from_arrow_schema(inferred_schema)
+        _inferred_schema = Schema.from_arrow_schema(inferred_schema)
         if self._schema is not None:
             if self.update_features:  # keep original features if they match, or update them
                 fields = {field.name: field for field in self._schema.type}
-                for inferred_field in inferred_features.type:
+                for inferred_field in _inferred_schema.type:
                     name = inferred_field.name
                     if name in fields:
                         if inferred_field == fields[name]:
-                            inferred_features[name] = self._schema[name]
-                self._schema = inferred_features
+                            _inferred_schema[name] = self._schema[name]
+                self._schema = _inferred_schema
                 schema: pa.Schema = inferred_schema
         else:
-            self._schema = inferred_features
-            schema: pa.Schema = inferred_features.arrow_schema
+            self._schema = _inferred_schema
+            schema: pa.Schema = _inferred_schema.to_arrow_schema()
         if self.disable_nullable:
             schema = pa.schema(pa.field(field.name, field.type, nullable=False) for field in schema)
         if self.with_metadata:
@@ -475,26 +475,26 @@ class ArrowWriter:
             metadata["fingerprint"] = fingerprint
         return {"CLTrainingFramework": json.dumps(metadata)}
 
-    def write_examples_on_file(self):
+    def write_samples_on_file(self):
         """Write stored examples from the write-pool of examples. It makes a table out of the examples and write it."""
-        if not self.current_examples:
+        if not self.current_samples:
             return
         # preserve the order the columns
         if self.schema:
             schema_cols = set(self.schema.names)
-            examples_cols = self.current_examples[0][0].keys()  # .keys() preserves the order (unlike set)
-            common_cols = [col for col in self.schema.names if col in examples_cols]
-            extra_cols = [col for col in examples_cols if col not in schema_cols]
+            samples_cols = self.current_samples[0][0].keys()  # .keys() preserves the order (unlike set)
+            common_cols = [col for col in self.schema.names if col in samples_cols]
+            extra_cols = [col for col in samples_cols if col not in schema_cols]
             cols = common_cols + extra_cols
         else:
-            cols = list(self.current_examples[0][0])
+            cols = list(self.current_samples[0][0])
         batch_examples = {}
         for col in cols:
             # We use row[0][col] since current_examples contains (example, key) tuples.
             # Moreover, examples could be Arrow arrays of 1 element.
             # This can happen in `.map()` when we want to re-write the same Arrow data
-            if all(isinstance(row[0][col], (pa.Array, pa.ChunkedArray)) for row in self.current_examples):
-                arrays = [row[0][col] for row in self.current_examples]
+            if all(isinstance(row[0][col], (pa.Array, pa.ChunkedArray)) for row in self.current_samples):
+                arrays = [row[0][col] for row in self.current_samples]
                 arrays = [
                     chunk
                     for array in arrays
@@ -504,10 +504,10 @@ class ArrowWriter:
             else:
                 batch_examples[col] = [
                     row[0][col].to_pylist()[0] if isinstance(row[0][col], (pa.Array, pa.ChunkedArray)) else row[0][col]
-                    for row in self.current_examples
+                    for row in self.current_samples
                 ]
         self.write_batch(batch_examples=batch_examples)
-        self.current_examples = []
+        self.current_samples = []
 
     def write_rows_on_file(self):
         """Write stored rows from the write-pool of rows. It concatenates the single-row tables and it writes the resulting table."""
@@ -519,36 +519,35 @@ class ArrowWriter:
 
     def write(
             self,
-            example: dict[str, Any],
+            sample: dict[str, Any],
             key: Optional[Union[str, int, bytes]] = None,
             writer_batch_size: Optional[int] = None,
     ):
         """Add a given (Example,Key) pair to the write-pool of examples which is written to file.
 
         Args:
-            example: the Example to add.
+            sample: the Example to add.
             key: Optional, a unique identifier(str, int or bytes) associated with each example
         """
         # Utilize the keys and duplicate checking when `self._check_duplicates` is passed True
         if self._check_duplicates:
             # Create unique hash from key and store as (key, example) pairs
             hash = self._hasher.hash(key)
-            self.current_examples.append((example, hash))
+            self.current_samples.append((sample, hash))
             # Maintain record of keys and their respective hashes for checking duplicates
             self.hkey_record.append((hash, key))
         else:
-            # Store example as a tuple so as to keep the structure of `self.current_examples` uniform
-            self.current_examples.append((example, ""))
+            self.current_samples.append((sample, ""))
 
         if writer_batch_size is None:
             writer_batch_size = self.writer_batch_size
-        if writer_batch_size is not None and len(self.current_examples) >= writer_batch_size:
+        if writer_batch_size is not None and len(self.current_samples) >= writer_batch_size:
             if self._check_duplicates:
                 self.check_duplicate_keys()
                 # Re-initializing to empty list for next batch
                 self.hkey_record = []
 
-            self.write_examples_on_file()
+            self.write_samples_on_file()
 
     def check_duplicate_keys(self):
         """Raises error if duplicates found in a batch"""
@@ -641,7 +640,7 @@ class ArrowWriter:
         pa_table = pa_table.combine_chunks()
         pa_table = pa_table_cast(pa_table, self._pa_schema)
         if self.embed_local_files:
-            pa_table = for_storage(pa_table)
+            pa_table = embed_local_file_to_cache(pa_table)
         self._num_bytes += pa_table.nbytes
         self._num_examples += pa_table.num_rows
         self.pa_writer.write_table(pa_table, writer_batch_size)
@@ -653,7 +652,7 @@ class ArrowWriter:
             self.check_duplicate_keys()
             # Re-initializing to empty list for next batch
             self.hkey_record = []
-        self.write_examples_on_file()
+        self.write_samples_on_file()
         # If schema is known, infer features even if no examples were written
         if self.pa_writer is None and self.schema:
             self._build_writer(self.schema)
