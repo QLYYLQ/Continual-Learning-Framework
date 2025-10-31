@@ -82,7 +82,7 @@ def table_flatten(table: pa.Table):
 
 
 @wrap_for_chunked_arrays
-def _cast_array_to_schema(
+def cast_pa_array_using_schema(
         array: pa.Array, _schema: "SchemaType", allow_primitive_to_str: bool = True, allow_decimal_to_str: bool = True
 ) -> pa.Array:
     """
@@ -90,15 +90,15 @@ def _cast_array_to_schema(
     from CLTrainingFramework.dataset.schema import LargeSequence, Sequence, schema_to_pyarrow
 
     _c = partial(
-        _cast_array_to_schema,
+        cast_pa_array_using_schema,
         allow_primitive_to_str=allow_primitive_to_str,
         allow_decimal_to_str=allow_decimal_to_str,
     )
 
     if isinstance(array, pa.ExtensionArray):
         array = array.storage
-    if hasattr(_schema, "prepare_for_arrow_storage"):
-        return _schema.prepare_for_arrow_storage(array)
+    if hasattr(_schema, "prepare_for_pa_cache"):
+        return _schema.prepare_for_pa_cache(array)
 
     elif pa.types.is_struct(array.type):
         # feature must be a dict or Sequence(subfeatures_dict)
@@ -215,7 +215,7 @@ def _cast_array_to_schema(
     raise TypeError(f"Couldn't cast array of type\n{short_str(array.type)}\nto\n{short_str(_schema)}")
 
 
-def cast_table_to_schema(table: pa.Table, schema: pa.Schema):
+def cast_pa_table_using_pa_schema(table: pa.Table, schema: pa.Schema):
     from CLTrainingFramework.dataset.schema import Schema
 
     _schema = Schema.from_arrow_schema(schema)
@@ -227,7 +227,7 @@ def cast_table_to_schema(table: pa.Table, schema: pa.Schema):
             requested_column_names=list(_schema),
         )
     arrays = [
-        _cast_array_to_schema(
+        cast_pa_array_using_schema(
             table[name] if name in table_column_names else pa.array([None] * len(table), type=schema.field(name).type),
             v,
         )
@@ -236,8 +236,10 @@ def cast_table_to_schema(table: pa.Table, schema: pa.Schema):
     return pa.Table.from_arrays(arrays, schema=schema)
 
 
-def table_cast(table: pa.Table, schema: pa.Schema):
-    """Improved version of `pa.Table.cast`.
+def pa_table_cast(table: pa.Table, schema: pa.Schema):
+    """
+
+    Improved version of `pa.Table.cast`.
 
     It supports casting to feature types stored in the schema metadata.
 
@@ -251,7 +253,7 @@ def table_cast(table: pa.Table, schema: pa.Schema):
         table (`pyarrow.Table`): the casted table
     """
     if table.schema != schema:
-        return cast_table_to_schema(table, schema)
+        return cast_pa_table_using_pa_schema(table, schema)
     elif table.schema.metadata != schema.metadata:
         return table.replace_schema_metadata(schema.metadata)
     else:

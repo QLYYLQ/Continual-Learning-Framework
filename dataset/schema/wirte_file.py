@@ -7,7 +7,7 @@ from CLTrainingFramework.dataset.schema.supported_schema_type import LargeSequen
 from CLTrainingFramework.dataset.schema.utils import _check_non_null_non_empty_recursive, write_image
 
 
-def prepare_for_storage(
+def prepare_for_pa_cache(
         obj: Any, keep_dim: bool = True, only_check_first_element: bool = True
 ) -> Any:
     """
@@ -116,12 +116,12 @@ def _check_is_mapping_element_changed(old_element:Mapping, new_element:Mapping):
     return is_changed
 
 
-def prepare_nested_sample_to_storage(schema, obj, level=0):
+def prepare_nested_sample_to_pa_cache(schema, obj, level=0):
     if isinstance(schema, dict):
         if level == 0 and obj is None:
             raise ValueError("Get None but expect an dict object")
         return (
-            {k: prepare_nested_sample_to_storage(schema[k], obj[k], level + 1) for k in schema}
+            {k: prepare_nested_sample_to_pa_cache(schema[k], obj[k], level + 1) for k in schema}
             if obj is not None
             else None
         )
@@ -130,15 +130,15 @@ def prepare_nested_sample_to_storage(schema, obj, level=0):
         if obj is None:
             return None
         elif isinstance(obj, np.ndarray):
-            return prepare_nested_sample_to_storage(schema, obj.tolist())
+            return prepare_nested_sample_to_pa_cache(schema, obj.tolist())
         else:
             if len(obj) > 0:
                 element = None
                 for element in obj:
                     if _check_non_null_non_empty_recursive(element, sub_schema):
                         break
-                if prepare_nested_sample_to_storage(sub_schema, element, level + 1) != element:
-                    return [prepare_nested_sample_to_storage(sub_schema, o, level + 1) for o in obj]
+                if prepare_nested_sample_to_pa_cache(sub_schema, element, level + 1) != element:
+                    return [prepare_nested_sample_to_pa_cache(sub_schema, o, level + 1) for o in obj]
             return list(obj)
     elif isinstance(schema, LargeSequence):
         if obj is None:
@@ -150,11 +150,11 @@ def prepare_nested_sample_to_storage(schema, obj, level=0):
                     if _check_non_null_non_empty_recursive(first_elmt, sub_schema):
                         break
                 if (
-                        prepare_nested_sample_to_storage_with_level(sub_schema, first_elmt, level=level + 1)
+                        prepare_nested_sample_to_pa_cache_with_level(sub_schema, first_elmt, level=level + 1)
                         != first_elmt
                 ):
                     return [
-                        prepare_nested_sample_to_storage_with_level(sub_schema, o, level=level + 1)
+                        prepare_nested_sample_to_pa_cache_with_level(sub_schema, o, level=level + 1)
                         for o in obj
                     ]
             return list(obj)
@@ -169,7 +169,7 @@ def prepare_nested_sample_to_storage(schema, obj, level=0):
                 # obj is a list of dict
                 for k in schema.schema:
                     list_dict[k] = [
-                        prepare_nested_sample_to_storage_with_level(
+                        prepare_nested_sample_to_pa_cache_with_level(
                             schema.schema[k], o.get(k), level=level + 1
                         )
                         for o in obj
@@ -180,7 +180,7 @@ def prepare_nested_sample_to_storage(schema, obj, level=0):
                 for k in schema.schema:
                     list_dict[k] = (
                         [
-                            prepare_nested_sample_to_storage_with_level(schema.schema[k], o, level=level + 1)
+                            prepare_nested_sample_to_pa_cache_with_level(schema.schema[k], o, level=level + 1)
                             for o in obj[k]
                         ]
                         if k in obj
@@ -198,23 +198,23 @@ def prepare_nested_sample_to_storage(schema, obj, level=0):
                 # be careful when comparing tensors here
                 if (
                         not (isinstance(first_elmt, list) or np.isscalar(first_elmt))
-                        or prepare_nested_sample_to_storage_with_level(
+                        or prepare_nested_sample_to_pa_cache_with_level(
                     schema.schema, first_elmt, level=level + 1
                 )
                         != first_elmt
                 ):
                     return [
-                        prepare_nested_sample_to_storage_with_level(schema.schema, o, level=level + 1)
+                        prepare_nested_sample_to_pa_cache_with_level(schema.schema, o, level=level + 1)
                         for o in obj
                     ]
             return list(obj)
 
     elif hasattr(schema, "sample_to_storage"):
-        return schema.sample_to_storage(obj) if obj is not None else None
+        return schema.sample_to_pa_cache(obj) if obj is not None else None
     return obj
 
 
-def prepare_nested_sample_to_storage_with_level(schema, obj, level=0):
+def prepare_nested_sample_to_pa_cache_with_level(schema, obj, level=0):
     """
     Encode a nested example.
     This is used since some features (in particular ClassLabel) have some logic during encoding.
@@ -228,7 +228,7 @@ def prepare_nested_sample_to_storage_with_level(schema, obj, level=0):
             raise ValueError("Got None but expected a dictionary instead")
         return (
             {
-                k: prepare_nested_sample_to_storage_with_level(schema[k], obj.get(k), level=level + 1)
+                k: prepare_nested_sample_to_pa_cache_with_level(schema[k], obj.get(k), level=level + 1)
                 for k in schema
             }
             if obj is not None
@@ -240,18 +240,18 @@ def prepare_nested_sample_to_storage_with_level(schema, obj, level=0):
         if obj is None:
             return None
         elif isinstance(obj, np.ndarray):
-            return prepare_nested_sample_to_storage_with_level(schema, obj.tolist())
+            return prepare_nested_sample_to_pa_cache_with_level(schema, obj.tolist())
         else:
             if len(obj) > 0:
                 for first_elmt in obj:
                     if _check_non_null_non_empty_recursive(first_elmt, sub_schema):
                         break
                 if (
-                        prepare_nested_sample_to_storage_with_level(sub_schema, first_elmt, level=level + 1)
+                        prepare_nested_sample_to_pa_cache_with_level(sub_schema, first_elmt, level=level + 1)
                         != first_elmt
                 ):
                     return [
-                        prepare_nested_sample_to_storage_with_level(sub_schema, o, level=level + 1)
+                        prepare_nested_sample_to_pa_cache_with_level(sub_schema, o, level=level + 1)
                         for o in obj
                     ]
             return list(obj)
@@ -265,11 +265,11 @@ def prepare_nested_sample_to_storage_with_level(schema, obj, level=0):
                     if _check_non_null_non_empty_recursive(first_elmt, sub_schema):
                         break
                 if (
-                        prepare_nested_sample_to_storage_with_level(sub_schema, first_elmt, level=level + 1)
+                        prepare_nested_sample_to_pa_cache_with_level(sub_schema, first_elmt, level=level + 1)
                         != first_elmt
                 ):
                     return [
-                        prepare_nested_sample_to_storage_with_level(sub_schema, o, level=level + 1)
+                        prepare_nested_sample_to_pa_cache_with_level(sub_schema, o, level=level + 1)
                         for o in obj
                     ]
             return list(obj)
@@ -284,7 +284,7 @@ def prepare_nested_sample_to_storage_with_level(schema, obj, level=0):
                 # obj is a list of dict
                 for k in schema.schema:
                     list_dict[k] = [
-                        prepare_nested_sample_to_storage_with_level(
+                        prepare_nested_sample_to_pa_cache_with_level(
                             schema.schema[k], o.get(k), level=level + 1
                         )
                         for o in obj
@@ -295,7 +295,7 @@ def prepare_nested_sample_to_storage_with_level(schema, obj, level=0):
                 for k in schema.schema:
                     list_dict[k] = (
                         [
-                            prepare_nested_sample_to_storage_with_level(schema.schema[k], o, level=level + 1)
+                            prepare_nested_sample_to_pa_cache_with_level(schema.schema[k], o, level=level + 1)
                             for o in obj[k]
                         ]
                         if k in obj
@@ -313,20 +313,20 @@ def prepare_nested_sample_to_storage_with_level(schema, obj, level=0):
                 # be careful when comparing tensors here
                 if (
                         not (isinstance(first_elmt, list) or np.isscalar(first_elmt))
-                        or prepare_nested_sample_to_storage_with_level(
+                        or prepare_nested_sample_to_pa_cache_with_level(
                     schema.schema, first_elmt, level=level + 1
                 )
                         != first_elmt
                 ):
                     return [
-                        prepare_nested_sample_to_storage_with_level(schema.schema, o, level=level + 1)
+                        prepare_nested_sample_to_pa_cache_with_level(schema.schema, o, level=level + 1)
                         for o in obj
                     ]
             return list(obj)
     # Object with special encoding:
     # ClassLabel will convert from string to int
     elif hasattr(schema, "sample_to_storage"):
-        return schema.sample_to_storage(obj) if obj is not None else None
+        return schema.sample_to_pa_cache(obj) if obj is not None else None
     # Other object should be directly convertible to a native Arrow type (like Translation and Translation)
 
     return obj
@@ -350,10 +350,10 @@ if __name__ == "__main__":
     tensor2 = torch.tensor([[4, 5, 6], [34, 643, 23]])
     tensor3 = torch.tensor(123)
     tensor4 = torch.tensor([1, 2, 3], dtype=torch.bfloat16)
-    a = prepare_for_storage(tensor1)
-    b = prepare_for_storage(tensor2)
-    c = prepare_for_storage(tensor3)
-    d = prepare_for_storage(tensor4)
+    a = prepare_for_pa_cache(tensor1)
+    b = prepare_for_pa_cache(tensor2)
+    c = prepare_for_pa_cache(tensor3)
+    d = prepare_for_pa_cache(tensor4)
     print(a,type(a))
     print(b)
     print(c)

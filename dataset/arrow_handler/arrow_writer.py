@@ -28,12 +28,12 @@ from fsspec.core import url_to_fs
 import CLTrainingFramework.dataset.utils.dataset_config as dataset_config
 import CLTrainingFramework.dataset.utils.package_config as package_config
 from CLTrainingFramework.dataset.arrow_handler.arrow_dataset.dataset_info import DatasetInfo
-from CLTrainingFramework.dataset.arrow_handler.arrow_table.utils import  _cast_array_to_schema, table_cast
+from CLTrainingFramework.dataset.arrow_handler.arrow_table.utils import  cast_pa_array_using_schema, pa_table_cast
 from CLTrainingFramework.dataset.arrow_handler.utils import DuplicatedKeysError, KeyHasher
 from CLTrainingFramework.dataset.arrow_utils import _ArrayXDExtensionType, list_of_np_array_to_pyarrow_list_array, \
     numpy_to_pyarrow_list_array, to_pyarrow_list_array,for_storage,array_cast
 from CLTrainingFramework.dataset.schema import Schema, Image, Value, Video, map_nested_schema, SchemaType, \
-    pyarrow_to_schema, schema_to_pyarrow, prepare_for_storage
+    pyarrow_to_schema, schema_to_pyarrow, prepare_for_pa_cache
 from CLTrainingFramework.dataset.utils import logging
 from CLTrainingFramework.dataset.utils.py_utils_mine import as_dict, first_non_null_non_empty_value
 from CLTrainingFramework.utils.filesystem import is_remote_filesystem
@@ -185,9 +185,9 @@ class TypedSequence:
 
             non_null_idx, non_null_value = first_non_null_non_empty_value(data)
             if isinstance(non_null_value, PIL.Image.Image):
-                return [Image().sample_to_storage(value) if value is not None else None for value in data], Image()
+                return [Image().sample_to_pa_cache(value) if value is not None else None for value in data], Image()
             if isinstance(non_null_value, list) and isinstance(non_null_value[0], PIL.Image.Image):
-                return [[Image().sample_to_storage(x) for x in value] if value is not None else None for value in
+                return [[Image().sample_to_pa_cache(x) for x in value] if value is not None else None for value in
                         data], [
                     Image()
                 ]
@@ -239,7 +239,7 @@ class TypedSequence:
                 out = list_of_np_array_to_pyarrow_list_array(data)
             else:
                 trying_cast_to_python_objects = True
-                out = pa.array(prepare_for_storage(data, keep_dim=False))
+                out = pa.array(prepare_for_pa_cache(data, keep_dim=False))
             # use smaller integer precisions if possible
             if self.trying_int_optimization:
                 if pa.types.is_int64(out.type):
@@ -254,7 +254,7 @@ class TypedSequence:
                 # We use cast_array_to_feature to support casting to custom types like Audio and Image
                 # Also, when trying type "string", we don't want to convert integers or floats to "string".
                 # We only do it if trying_type is False - since this is what the user asks for.
-                out = _cast_array_to_schema(
+                out = cast_pa_array_using_schema(
                     out, type, allow_primitive_to_str=not self.trying_type, allow_decimal_to_str=not self.trying_type
                 )
             return out
@@ -275,7 +275,7 @@ class TypedSequence:
                         return list_of_np_array_to_pyarrow_list_array(data)
                     else:
                         trying_cast_to_python_objects = True
-                        return pa.array(prepare_for_storage(data, keep_dim=False))
+                        return pa.array(prepare_for_pa_cache(data, keep_dim=False))
                 except pa.lib.ArrowInvalid as e:
                     if "overflow" in str(e):
                         raise OverflowError(
@@ -289,10 +289,10 @@ class TypedSequence:
                         return out
                     elif trying_cast_to_python_objects and "Could not convert" in str(e):
                         out = pa.array(
-                            prepare_for_storage(data, keep_dim=False, only_check_first_element=False)
+                            prepare_for_pa_cache(data, keep_dim=False, only_check_first_element=False)
                         )
                         if type is not None:
-                            out = _cast_array_to_schema(
+                            out = cast_pa_array_using_schema(
                                 out, type, allow_primitive_to_str=True, allow_decimal_to_str=True
                             )
                         return out
@@ -307,9 +307,9 @@ class TypedSequence:
                 logger.info(f"Failed to cast a sequence to {optimized_int_pa_type_str}. Falling back to int64.")
                 return out
             elif trying_cast_to_python_objects and "Could not convert" in str(e):
-                out = pa.array(prepare_for_storage(data, keep_dim=False, only_check_first_element=False))
+                out = pa.array(prepare_for_pa_cache(data, keep_dim=False, only_check_first_element=False))
                 if type is not None:
-                    out = _cast_array_to_schema(out, type, allow_primitive_to_str=True, allow_decimal_to_str=True)
+                    out = cast_pa_array_using_schema(out, type, allow_primitive_to_str=True, allow_decimal_to_str=True)
                 return out
             else:
                 raise
@@ -612,7 +612,7 @@ class ArrowWriter:
             col_values = batch_examples[col]
             col_type = features[col] if features else None
             if isinstance(col_values, (pa.Array, pa.ChunkedArray)):
-                array = _cast_array_to_schema(col_values, col_type) if col_type is not None else col_values
+                array = cast_pa_array_using_schema(col_values, col_type) if col_type is not None else col_values
                 arrays.append(array)
                 inferred_features[col] = pyarrow_to_schema(col_values.type)
             else:
@@ -639,7 +639,7 @@ class ArrowWriter:
         if self.pa_writer is None:
             self._build_writer(inferred_schema=pa_table.schema)
         pa_table = pa_table.combine_chunks()
-        pa_table = table_cast(pa_table, self._pa_schema)
+        pa_table = pa_table_cast(pa_table, self._pa_schema)
         if self.embed_local_files:
             pa_table = for_storage(pa_table)
         self._num_bytes += pa_table.nbytes

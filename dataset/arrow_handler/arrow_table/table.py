@@ -5,7 +5,7 @@ import numpy as np
 import pyarrow as pa
 
 from CLTrainingFramework.dataset.arrow_handler.arrow_table.block_table import Table, BlockTable, MemoryTable
-from CLTrainingFramework.dataset.arrow_handler.arrow_table.utils import table_flatten, table_cast, concat_for_pyarrow, \
+from CLTrainingFramework.dataset.arrow_handler.arrow_table.utils import table_flatten, pa_table_cast, concat_for_pyarrow, \
     pyarrow_table_from_grid, merge_specific_table_type_from_blocks
 from CLTrainingFramework.dataset.arrow_utils import short_str
 
@@ -262,7 +262,7 @@ class ConcatenationTable(Table):
         """
         from CLTrainingFramework.dataset.schema import Schema
 
-        table = table_cast(self.table, target_schema, *args, **kwargs)
+        table = pa_table_cast(self.table, target_schema, *args, **kwargs)
         target_features = Schema.from_arrow_schema(target_schema)
         blocks = []
         for subtables in self.blocks:

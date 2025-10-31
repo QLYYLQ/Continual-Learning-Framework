@@ -591,8 +591,8 @@ def for_storage(array: pa.Array, schema: "SchemaType"):
 
     if isinstance(array, pa.ExtensionArray):
         array = array.storage
-    if hasattr(schema, "embed_storage"):
-        return schema.embed_storage(array)
+    if hasattr(schema, "embed_local_file_to_pa_cache"):
+        return schema.embed_local_file_to_pa_cache(array)
     elif pa.types.is_struct(array.type):
         # feature must be a dict or Sequence(subfeatures_dict)
         if isinstance(schema, Sequence) and isinstance(schema.schema, dict):

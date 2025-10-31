@@ -6,7 +6,7 @@ import numpy as np
 import pyarrow as pa
 
 from CLTrainingFramework.dataset.arrow_handler.arrow_table.utils import _deepcopy, _memory_table_from_file, \
-    _memory_table_from_buffer, table_flatten, table_cast, _memory_mapped_arrow_table_from_file
+    _memory_table_from_buffer, table_flatten, pa_table_cast, _memory_mapped_arrow_table_from_file
 
 
 class IndexPlugin:
@@ -223,7 +223,7 @@ class MemoryTable(BlockTable):
         return MemoryTable(self.table.combine_chunks(*args, **kwargs))
 
     def cast(self, pa_schema: pa.Schema):
-        return MemoryTable(table_cast(self.table, schema=pa_schema))
+        return MemoryTable(pa_table_cast(self.table, schema=pa_schema))
 
     def replace_schema_metadata(self, *args, **kwargs):
         return MemoryTable(self.table.replace_schema_metadata(*args, **kwargs))
@@ -307,7 +307,7 @@ class MemoryMappedTable(BlockTable):
     def cast(self, pa_schema: pa.Schema):
         replay = ("cast", (), {})
         replays = self._append_replay(replay)
-        return MemoryMappedTable(table_cast(self.table, schema=pa_schema), self.path, replays)
+        return MemoryMappedTable(pa_table_cast(self.table, schema=pa_schema), self.path, replays)
 
     def replace_schema_metadata(self, *args, **kwargs):
         replay = ("replace_schema_metadata", copy.deepcopy(args), copy.deepcopy(kwargs))
@@ -349,7 +349,7 @@ class MemoryMappedTable(BlockTable):
         if replays is not None:
             for name, args, kwargs in replays:
                 if name == "cast":
-                    table = table_cast(table, *args, **kwargs)
+                    table = pa_table_cast(table, *args, **kwargs)
                 elif name == "flatten":
                     table = table_flatten(table)
                 else:

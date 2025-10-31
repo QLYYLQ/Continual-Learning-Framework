@@ -33,7 +33,7 @@ class Value:
     def __call__(self):
         return self.pa_type
 
-    def encode(self, value):
+    def sample_to_pa_cache(self, value):
         if pa.types.is_boolean(self.pa_type):
             return bool(value)
         elif pa.types.is_integer(self.pa_type):
@@ -138,7 +138,7 @@ class ClassLabel:
             raise ValueError(f"invalid string class lable {value}")
         return int_return
 
-    def sample_to_storage(self, sample):
+    def sample_to_pa_cache(self, sample):
         if self.names_num is None:
             raise ValueError("Please provide names or names_num")
         if isinstance(sample, str):
@@ -147,7 +147,7 @@ class ClassLabel:
             raise ValueError(f"invalid string class lable {sample}, total length is {self.names_num}")
         return sample
 
-    def cast_storage(self, storage: Union[pa.StringArray, pa.IntegerArray]) -> pa.Int64Array:
+    def prepare_for_pa_cache(self, storage: Union[pa.StringArray, pa.IntegerArray]) -> pa.Int64Array:
         if isinstance(storage, pa.IntegerArray) and len(storage) > 0:
             min_max = pc.min_max(storage).as_py()
             if min_max["max"] is not None and min_max["max"] >= self.names_num:

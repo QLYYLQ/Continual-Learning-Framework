@@ -32,7 +32,7 @@ class Image:
     def __call__(self):
         return self.pa_type
 
-    def sample_to_storage(self, value: Union[str, bytes, bytearray, dict, np.array, img]) -> dict:
+    def sample_to_pa_cache(self, value: Union[str, bytes, bytearray, dict, np.array, img]) -> dict:
         if isinstance(value, list):
             value = np.array(value)
         if isinstance(value, str):
@@ -89,7 +89,7 @@ class Image:
             }
         )
 
-    def prepare_for_arrow_storage(self, storage: Union[pa.StringArray, pa.StructArray, pa.ListArray]) -> pa.StructArray:
+    def prepare_for_pa_cache(self, storage: Union[pa.StringArray, pa.StructArray, pa.ListArray]) -> pa.StructArray:
         if pa.types.is_string(storage.type):
             bytes_array = pa.array([None] * len(storage), type=pa.binary())
             storage = pa.StructArray.from_arrays(
@@ -126,7 +126,7 @@ class Image:
             )
         return array_cast(storage, self.pa_type)
 
-    def embed_storage(self, storage: pa.StructArray) -> pa.StructArray:
+    def embed_local_file_to_pa_cache(self, storage: pa.StructArray) -> pa.StructArray:
         """Embed image files into the Arrow array.
 
         Args:

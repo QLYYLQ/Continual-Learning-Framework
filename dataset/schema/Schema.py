@@ -21,7 +21,7 @@ from CLTrainingFramework.dataset.arrow_utils import (
 from CLTrainingFramework.dataset.schema._type import SchemaType, _SCHEMA_TYPES
 from CLTrainingFramework.dataset.schema.load_file import load_from_storage_with_nested_sample
 from CLTrainingFramework.dataset.schema.supported_schema_type import Value, Sequence, LargeSequence
-from CLTrainingFramework.dataset.schema.wirte_file import prepare_for_storage, prepare_nested_sample_to_storage
+from CLTrainingFramework.dataset.schema.wirte_file import prepare_for_pa_cache, prepare_nested_sample_to_pa_cache
 from CLTrainingFramework.dataset.utils.py_utils_mine import as_dict, zip_dict
 from CLTrainingFramework.utils.naming import camelcase_to_snakecase, snakecase_to_camelcase
 
@@ -480,21 +480,21 @@ class Schema(dict):
             )
         return loaded_batch
 
-    def sample_to_storage(self, sample):
-        sample = prepare_for_storage(sample)
-        return prepare_nested_sample_to_storage(self, sample)
+    def sample_to_pa_cache(self, sample):
+        sample = prepare_for_pa_cache(sample)
+        return prepare_nested_sample_to_pa_cache(self, sample)
 
-    def column_to_storage(self, column, column_name: str):
-        column = prepare_for_storage(column)
-        return [prepare_nested_sample_to_storage(self[column_name], obj, level=1) for obj in column]
+    def column_to_pa_cache(self, column, column_name: str):
+        column = prepare_for_pa_cache(column)
+        return [prepare_nested_sample_to_pa_cache(self[column_name], obj, level=1) for obj in column]
 
-    def batch_to_storage(self, batch: dict):
+    def batch_to_pa_cache(self, batch: dict):
         storage_batch = {}
         if set(batch) != set(self):
             raise ValueError(f"Column mismatch between batch {set(batch)} and schema {set(self)}")
         for k, v in batch.items():
-            column = prepare_for_storage(v)
-            storage_batch[k] = [prepare_nested_sample_to_storage(self, obj, level=1) for obj in column]
+            column = prepare_for_pa_cache(v)
+            storage_batch[k] = [prepare_nested_sample_to_pa_cache(self, obj, level=1) for obj in column]
         return storage_batch
 
     def reorder_fields_as(self, other: "Schema") -> "Schema":
@@ -638,4 +638,4 @@ def check_embed_storage_for_schema(schema:SchemaType)->bool:
     elif isinstance(schema,( LargeSequence ,Sequence)):
         return check_embed_storage_for_schema(schema.schema)
     else:
-        return hasattr(schema,"embed_storage")
+        return hasattr(schema,"embed_local_file_to_pa_cache")

@@ -27,7 +27,7 @@ class Video:
     def __call__(self):
         return self.pa_type
 
-    def sample_to_storage(self, sample):
+    def sample_to_pa_cache(self, sample):
         """
         Encode example into a format for Arrow.
 
@@ -105,7 +105,7 @@ class Video:
             }
         )
 
-    def cast_storage(self, storage: Union[pa.StringArray, pa.StructArray, pa.ListArray]) -> pa.StructArray:
+    def prepare_for_pa_cache(self, storage: Union[pa.StringArray, pa.StructArray, pa.ListArray]) -> pa.StructArray:
 
         if pa.types.is_string(storage.type):
             bytes_array = pa.array([None] * len(storage), type=pa.binary())
