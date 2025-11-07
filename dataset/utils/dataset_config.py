@@ -7,3 +7,9 @@ PARQUET_ROW_GROUP_SIZE_FOR_VIDEO_DATASETS = 10
 DEFAULT_MAX_BATCH_SIZE = 1000
 ARROW_READER_BATCH_SIZE_IN_DATASET_ITER = 10
 MAX_SHARD_SIZE = "500MB"
+DATASET_CACHE_ATTR = [
+    "_fingerprint",
+    "_format_columns",
+    "_format_kwargs",
+    "_format_type",
+    "_output_all_columns", ]

@@ -1,36 +1,48 @@
 import copy
+import itertools
 import json
 import os.path
+import shutil
+import tempfile
 from os import PathLike
 from pathlib import Path
-from typing import Optional, Union, Callable, TypeVar, overload, Iterable
+from typing import Optional, Union, Callable, TypeVar, overload, Iterable, Iterator
 
 import fsspec
+import numpy as np
 import pyarrow as pa
 from fsspec import url_to_fs
 
 import CLTrainingFramework.dataset.utils.dataset_config as dataset_config
-from CLTrainingFramework.dataset.arrow_handler.arrow_table.table import table_cache_file_list
-from CLTrainingFramework.dataset.arrow_handler.arrow_table.utils import table_iter, map_function_to_table
 from CLTrainingFramework.dataset.arrow_handler.arrow_dataset.dataset_plugin import DatasetInfoPlugin, DatasetInfo, \
     NamedSplit
 from CLTrainingFramework.dataset.arrow_handler.arrow_dataset.fingerprint import generate_fingerprint
 from CLTrainingFramework.dataset.arrow_handler.arrow_dataset.index_enhancement.dataset_index_plugin import \
     IndexablePlugin
 from CLTrainingFramework.dataset.arrow_handler.arrow_dataset.splits import Split
-from CLTrainingFramework.dataset.arrow_handler.arrow_reader import ArrowReader
-from CLTrainingFramework.dataset.arrow_handler.arrow_table import Table, MemoryTable
 from CLTrainingFramework.dataset.arrow_handler.arrow_dataset.utils import _check_table, register_dataset_for_no_cache, \
     _check_column_names, update_metadata_with_schema
+from CLTrainingFramework.dataset.arrow_handler.arrow_dataset.utils import transmit_format
+from CLTrainingFramework.dataset.arrow_handler.arrow_reader import ArrowReader
+from CLTrainingFramework.dataset.arrow_handler.arrow_table import Table, MemoryTable, MemoryMappedTable
+from CLTrainingFramework.dataset.arrow_handler.arrow_table.table import table_cache_file_list
 from CLTrainingFramework.dataset.arrow_handler.arrow_table.utils import cast_pa_array_using_schema
-from CLTrainingFramework.dataset.arrow_handler.arrow_writer import OptimizedTypedSequence
+from CLTrainingFramework.dataset.arrow_handler.arrow_table.utils import table_iter, map_function_to_table
+from CLTrainingFramework.dataset.arrow_handler.arrow_writer import OptimizedTypedSequence, ArrowWriter
+from CLTrainingFramework.dataset.formatting import get_formatter, format_table, query_table, is_range_contiguous
 from CLTrainingFramework.dataset.schema import Schema, pyarrow_to_schema, Video, Image, SchemaType
 from CLTrainingFramework.dataset.schema.Schema import require_loading
 from CLTrainingFramework.dataset.utils.fingerprint import fingerprint_transform
-from CLTrainingFramework.dataset.formatting import get_formatter, format_table, query_table
-from CLTrainingFramework.dataset.utils.py_utils_mine import convert_file_size_to_int
+from CLTrainingFramework.dataset.utils.py_utils_mine import convert_file_size_to_int, as_dict
+from CLTrainingFramework.utils.logging import get_logger
 
+logger = get_logger(__name__)
 _T = TypeVar("_T")
+
+
+def _check_valid_indices_value(index, size):
+    if (index < 0 and index + size < 0) or (index >= size):
+        raise IndexError(f"Index {index} out of range for dataset of size {size}")
 
 
 class Dataset(DatasetInfoPlugin, IndexablePlugin):
@@ -174,6 +186,146 @@ class Dataset(DatasetInfoPlugin, IndexablePlugin):
         formatted_output = format_table(pa_sub_table, i, formatter, format_columns, output_all_columns)
         return formatted_output
 
+    @transmit_format
+    @fingerprint_transform(inplace=False)
+    def _select_contiguous(self, start: int, length: int, new_fingerprint: Optional[str] = None) -> "Dataset":
+        if len(self.list_indexes()) > 0:
+            raise RuntimeError(
+                "first run drop_index to remove index and then re-add it"
+            )
+        if len(self) == 0:
+            return self
+        _check_valid_indices_value(start, len(self))
+        _check_valid_indices_value(start + length - 1, len(self))
+        if self._indices is not None or length == 0:
+            return Dataset(
+                self.data.slice(start, length),
+                info=self.info.copy(),
+                split=self.split,
+                fingerprint=new_fingerprint
+            )
+        else:
+            return Dataset(
+                self.data,
+                info=self.info.copy(),
+                split=self.split,
+                indices_table=self._indices.slice(start, length),
+                fingerprint=new_fingerprint
+            )
+
+    @transmit_format
+    @fingerprint_transform(inplace=False)
+    def _select_with_indices_mapping(self, indices: Iterable, keep_in_memory: bool = False,
+                                     indices_cache_file_name: Optional[str] = None,
+                                     writer_batch_size: Optional[int] = 1000,
+                                     new_fingerprint: Optional[str] = None) -> "Dataset":
+        """Create a new dataset with rows selected following the list/array of indices.
+                The new dataset is made by creating a new indices mapping on top of the main arrow table.
+
+                Args:
+                    indices (sequence, iterable, range, ndarray or Series): List or 1D-array of integer indices for indexing.
+                    keep_in_memory (`bool`, default `False`): Keep the indices mapping in memory instead of writing it to a cache file.
+                    indices_cache_file_name (`str`, optional, default `None`): Provide the name of a path for the cache file. It is used to store the
+                        indices mapping instead of the automatically generated cache file name.
+                    writer_batch_size (`int`, default `1000`): Number of rows per write operation for the cache file writer.
+                        This value is a good trade-off between memory usage during the processing, and processing speed.
+                        Higher value makes the processing do fewer lookups, lower value consume less temporary memory while running `.map()`.
+                    new_fingerprint (`str`, optional, default `None`): the new fingerprint of the dataset after transform.
+                        If `None`, the new fingerprint is computed using a hash of the previous fingerprint, and the transform arguments
+                """
+        if keep_in_memory and indices_cache_file_name is not None:
+            raise ValueError("Please use either `keep_in_memory` or `indices_cache_file_name` but not both.")
+
+        if len(self.list_indexes()) > 0:
+            raise RuntimeError(
+                "Using `.select` on a dataset with attached indexes is not allowed. You can first run `.drop_index() to remove your index and then re-add it."
+            )
+
+        # If the array is empty we do nothing
+        if len(self) == 0:
+            return self
+
+        # Prepare the writer for our indices arrow table
+        if keep_in_memory or indices_cache_file_name is None:
+            buf_writer = pa.BufferOutputStream()
+            tmp_file = None
+            writer = ArrowWriter(
+                stream=buf_writer, writer_batch_size=writer_batch_size, fingerprint=new_fingerprint, unit="indices"
+            )
+        else:
+            buf_writer = None
+            logger.info(f"Caching indices mapping at {indices_cache_file_name}")
+            cache_dir = os.path.dirname(indices_cache_file_name)
+            os.makedirs(cache_dir, exist_ok=True)
+            tmp_file = tempfile.NamedTemporaryFile("wb", dir=cache_dir, delete=False)
+            writer = ArrowWriter(
+                path=tmp_file.name, writer_batch_size=writer_batch_size, fingerprint=new_fingerprint, unit="indices"
+            )
+
+        indices = indices if isinstance(indices, list) else list(indices)
+
+        size = len(self)
+        if indices:
+            _check_valid_indices_value(int(max(indices)), size=size)
+            _check_valid_indices_value(int(min(indices)), size=size)
+        else:
+            return self._select_contiguous(0, 0, new_fingerprint=new_fingerprint)
+
+        indices_array = pa.array(indices, type=pa.uint64())
+        # Check if we need to convert indices
+        if self._indices is not None:
+            indices_array = self._indices.column(0).take(indices_array)
+
+        indices_table = pa.Table.from_arrays([indices_array], names=["indices"])
+
+        with writer:
+            try:
+                writer.write_table(indices_table)
+                writer.finalize()  # close_stream=bool(buf_writer is None))  We only close if we are writing in a file
+            except (Exception, KeyboardInterrupt):
+                if tmp_file is not None:
+                    tmp_file.close()
+                    if os.path.exists(tmp_file.name):
+                        os.remove(tmp_file.name)
+                raise
+
+        if tmp_file is not None:
+            tmp_file.close()
+            shutil.move(tmp_file.name, indices_cache_file_name)
+            umask = os.umask(0o666)
+            os.umask(umask)
+            os.chmod(indices_cache_file_name, 0o666 & ~umask)
+
+        # Return new Dataset object
+        if buf_writer is None:
+            return self._new_dataset_with_indices(
+                indices_cache_file_name=indices_cache_file_name, fingerprint=new_fingerprint
+            )
+        else:
+            return self._new_dataset_with_indices(indices_buffer=buf_writer.getvalue(), fingerprint=new_fingerprint)
+
+    def _new_dataset_with_indices(self, indices_cache_file_name: Optional[str] = None,
+                                  indices_buffer: Optional[pa.Buffer] = None, fingerprint: Optional[str] = None):
+        if indices_cache_file_name is None and indices_buffer is None:
+            raise ValueError(
+                "Either `indices_cache_file_name` or `indices_buffer` must be provided."
+            )
+        if fingerprint is None:
+            raise ValueError(
+                "fingerprint is needed"
+            )
+        if indices_cache_file_name is not None:
+            indices_table = MemoryMappedTable.from_file(indices_cache_file_name)
+        else:
+            indices_table = MemoryTable.from_buffer(indices_buffer)
+        return Dataset(
+            self.data,
+            info=self.info.copy(),
+            split=self.split,
+            indices_table=indices_table,
+            fingerprint=fingerprint,
+        )
+
     @property
     def schema(self) -> Schema:
         schema = super().schema
@@ -197,6 +349,10 @@ class Dataset(DatasetInfoPlugin, IndexablePlugin):
         if self._indices is not None:
             cache_files += table_cache_file_list(self._indices)
         return [{"filename": a} for a in cache_files]
+
+    @property
+    def column_names(self) -> list[str]:
+        return self._data.column_names
 
     @classmethod
     def from_file(
@@ -284,7 +440,7 @@ class Dataset(DatasetInfoPlugin, IndexablePlugin):
                   field: Optional[str] = None, num_proc: Optional[int] = None, **kwargs):
         raise NotImplementedError
 
-    def save_to_disk(self, dataset_path: PathLike, max_shard_size: Optional[Union[str, int]] = None,
+    def save_to_disk(self, dataset_path: Union[str, PathLike, bytes], max_shard_size: Optional[Union[str, int]] = None,
                      num_shards: Optional[int] = None, num_proc: int = 1, storage_options: Optional[dict] = None):
         """
         args:
@@ -309,7 +465,89 @@ class Dataset(DatasetInfoPlugin, IndexablePlugin):
         if True:  # for remote file system, this is not necessary
             parent_cache_file_path = {Path(a["filename"]).resolve().parent for a in self.cache_files}
             if Path(dataset_path).expanduser().resolve() in parent_cache_file_path:
-                raise PermissionError("哥，你好像对一个文件同时在做读和写的操作，有permission error或者segfault会弹出来的，我先帮你Error一下")
+                raise PermissionError(
+                    "哥，你好像对一个文件同时在做读和写的操作，有permission error或者segfault会弹出来的，我先帮你Error一下")
+        fs.makedirs(dataset_path, exist_ok=True)
+        state = {
+            i: self.__dict__[i]
+            for i in dataset_config.DATASET_CACHE_ATTR
+        }
+        state["_split"] = str(self.split) if self.split is not None else self.split
+        state["_data_files"] = [
+            {
+                "filename": f"data-{i:05d}-of-{num_shards:05d}.arrow" for i in range(num_shards)
+            }
+        ]
+        for k, v in state["_format_kwargs"].items():
+            try:
+                json.dumps(v)
+            except TypeError as e:
+                raise TypeError(
+                    f"str(e)\n---From Framework\nThe format kwargs must be JSON serializable, the value:{v}, with key:{k} can't be serializable"
+                )
+        dataset_info = as_dict(self._info)
+        kwargs_per_job = (
+            {
+                "job_id": i,
+                "shard": self.shard()
+            }
+            for i in range(num_shards)
+        )
+
+    def shard(
+            self,
+            num_shards: int,
+            index: int,
+            contiguous: bool = True,
+            keep_in_memory: bool = False,
+            indices_cache_file_name: Optional[str] = None,
+            writer_batch_size: Optional[int] = 1000,
+    ) -> "Dataset":
+        """
+        Return the `index`-nth shard from dataset split into `num_shards` pieces.
+
+        Note: n should be less or equal to the number of elements in the dataset `len(dataset)`.
+
+        On the other hand, `dataset.shard(n, i, contiguous=False)` contains all elements of the dataset whose index mod `n = i`.
+
+        Be sure to shard before using any randomizing operator (such as `shuffle`).
+        It is best if the shard operator is used early in the dataset pipeline.
+
+        Args:
+            num_shards (`int`):
+                How many shards to split the dataset into.
+            index (`int`):
+                Which shard to select and return.
+            contiguous: (`bool`, defaults to `True`):
+                Whether to select contiguous blocks of indices for shards.
+            keep_in_memory (`bool`, defaults to `False`):
+                Keep the dataset in memory instead of writing it to a cache file.
+            indices_cache_file_name (`str`, *optional*):
+                Provide the name of a path for the cache file. It is used to store the
+                indices of each shard instead of the automatically generated cache file name.
+            writer_batch_size (`int`, defaults to `1000`):
+                This only concerns the indices mapping.
+                Number of indices per write operation for the cache file writer.
+                This value is a good trade-off between memory usage during the processing, and processing speed.
+                Higher value makes the processing do fewer lookups, lower value consume less temporary memory while running `map`.
+        """
+        if not 0 <= index < num_shards:
+            raise ValueError("index should be in [0, num_shards-1]")
+        if contiguous:
+            div = len(self) // num_shards
+            mod = len(self) % num_shards
+            start = div * index + min(index, mod)
+            end = start + div + (1 if index < mod else 0)
+            indices = range(start, end)
+        else:
+            indices = np.arange(index, len(self), num_shards)
+
+        return self.select(
+            indices=indices,
+            keep_in_memory=keep_in_memory,
+            indices_cache_file_name=indices_cache_file_name,
+            writer_batch_size=writer_batch_size,
+        )
 
     def with_format(self, type: Optional[str] = None, columns: Optional[list] = None, output_all_columns: bool = False,
                     **kwargs) -> "Dataset":
@@ -320,3 +558,36 @@ class Dataset(DatasetInfoPlugin, IndexablePlugin):
     @fingerprint_transform(inplace=True)
     def set_format(self, type, columns, output_all_columns, **kwargs):
         pass
+
+    @transmit_format
+    @fingerprint_transform(inplace=False, ignore_kwargs=["indices_cache_file_name"])
+    def select(self, indices: Iterable, keep_in_memory: bool = False, indices_cache_file_name: Optional[str] = None,
+               writer_batch_size: Optional[int] = 1000, new_fingerprint: Optional[str] = None) -> "Dataset":
+        if keep_in_memory and indices_cache_file_name is not None:
+            raise ValueError("not both keep in memory or indices cache file name")
+        if len(self.list_indexes()) > 0:
+            raise RuntimeError(
+                "using select on a dataset with attached indexes is not allowed, first run drop_index to remove index and then re-add it")
+        if len(self) == 0:
+            return self
+        if isinstance(indices, (pa.Array, pa.ChunkedArray)):
+            indices = indices.to_numpy().astype(np.int64)
+        elif isinstance(indices, Iterator):
+            indices = list(indices)
+        elif isinstance(indices, range):
+            if is_range_contiguous(indices) and indices.start >= 0:
+                start, length = indices.start, indices.stop - indices.start
+                return self._select_contiguous(start, length, new_fingerprint=new_fingerprint)
+        else:
+            try:
+                start = next(iter(indices))
+            except StopIteration as e:
+                return self._select_contiguous(0,0,new_fingerprint=new_fingerprint)
+            if start>=0:
+                counter_from_start = itertools.count(start=start)
+                if all(i==j for i,j in zip(indices, counter_from_start)):
+                    length = next(counter_from_start)-start
+                    return self._select_contiguous(start, length, new_fingerprint)
+        return self._select_with_indices_mapping(
+            indices, keep_in_memory, indices_cache_file_name, writer_batch_size, new_fingerprint
+        )

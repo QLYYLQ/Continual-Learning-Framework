@@ -37,7 +37,7 @@ ColumnFormat = TypeVar("ColumnFormat")
 BatchFormat = TypeVar("BatchFormat")
 
 
-def _is_range_contiguous(key: range) -> bool:
+def is_range_contiguous(key: range) -> bool:
     return key.step == 1 and key.stop >= key.start
 
 
@@ -62,7 +62,7 @@ def _query_table_with_indices_mapping(
     if isinstance(key, slice):
         key = range(*key.indices(indices.num_rows))
     if isinstance(key, range):
-        if _is_range_contiguous(key) and key.start >= 0:
+        if is_range_contiguous(key) and key.start >= 0:
             return _query_table(
                 table, [i.as_py() for i in indices.fast_slice(key.start, key.stop - key.start).column(0)]
             )
@@ -86,7 +86,7 @@ def _query_table(table: Table, key: Union[int, slice, range, str, Iterable]) -> 
     if isinstance(key, slice):
         key = range(*key.indices(table.num_rows))
     if isinstance(key, range):
-        if _is_range_contiguous(key) and key.start >= 0:
+        if is_range_contiguous(key) and key.start >= 0:
             return table.fast_slice(key.start, key.stop - key.start)
         else:
             pass  # treat as an iterable

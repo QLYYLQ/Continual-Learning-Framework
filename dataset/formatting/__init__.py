@@ -25,6 +25,7 @@ from CLTrainingFramework.dataset.formatting.formatting import (
     TensorFormatter,
     format_table,
     query_table,
+    is_range_contiguous
 )
 from CLTrainingFramework.dataset.formatting.np_formatter import NumpyFormatter
 from CLTrainingFramework.utils import logging
