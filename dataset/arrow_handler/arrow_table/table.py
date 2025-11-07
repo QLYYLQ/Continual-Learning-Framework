@@ -4,6 +4,7 @@ from typing import Union, TypeVar, TYPE_CHECKING
 import numpy as np
 import pyarrow as pa
 
+from CLTrainingFramework.dataset.arrow_handler.arrow_table import MemoryMappedTable
 from CLTrainingFramework.dataset.arrow_handler.arrow_table.block_table import Table, BlockTable, MemoryTable
 from CLTrainingFramework.dataset.arrow_handler.arrow_table.utils import table_flatten, pa_table_cast, concat_for_pyarrow, \
     pyarrow_table_from_grid, merge_specific_table_type_from_blocks
@@ -447,6 +448,20 @@ def concat_tables(tables: list[Table], axis: int = 0) -> Table:
     if len(tables) == 1:
         return tables[0]
     return ConcatenationTable.from_tables(tables, axis=axis)
+
+
+def table_cache_file_list(table: Table) -> list[str]:
+    if isinstance(table,ConcatenationTable):
+        cache_files = [
+        ]
+        for a in table.blocks:
+            for b in a:
+                cache_files +=table_cache_file_list(b)
+        return cache_files
+    elif isinstance(table,MemoryMappedTable):
+        return [table.path]
+    else:
+        return []
 
 
 if __name__ == '__main__':

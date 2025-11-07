@@ -7,6 +7,7 @@ _uppercase_uppercase_re = re.compile(r"([A-Z]+)([A-Z][a-z])")
 _lowercase_uppercase_re = re.compile(r"([a-z\d])([A-Z])")
 
 
+INVALID_WINDOWS_CHARACTERS_IN_PATH = r"<>:/\|?*"
 def camelcase_to_snakecase(name):
     """Convert camel-case string to snake-case."""
     name = _uppercase_uppercase_re.sub(r"\1_\2", name)

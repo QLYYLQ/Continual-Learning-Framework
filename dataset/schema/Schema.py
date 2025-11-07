@@ -131,23 +131,23 @@ def _keep_schema_dict_synced(func):
             self: "Schema" = kwargs.pop("self")
         out = func(self, *args, **kwargs)
         assert hasattr(self, "_required_unpack_column")
-        self._required_unpack_column = {k: require_unpacking(v) for k, v in self.items()}
+        self._required_unpack_column = {k: require_loading(v) for k, v in self.items()}
         return out
 
     wrapper._decorator_name_ = "_keep_schema_dict_synced"
     return wrapper
 
 
-def require_unpacking(schema: SchemaType, forced_decode: bool = False):
+def require_loading(schema: SchemaType, ignore_sample_from_load_attribute: bool = False):
     if isinstance(schema, dict):
-        return any(require_unpacking(f) for f in schema.values())
+        return any(require_loading(f) for f in schema.values())
     elif isinstance(schema, (list, tuple)):
-        return require_unpacking(schema[0], forced_decode=forced_decode)
+        return require_loading(schema[0])
     elif isinstance(schema, (LargeSequence, Sequence)):
-        return require_unpacking(schema.schema, forced_decode=forced_decode)
+        return require_loading(schema.schema)
     else:
-        return hasattr(schema, "unpack_example") and (
-            getattr(schema, "unpack", True) if not forced_decode else forced_decode
+        return hasattr(schema, "sample_from_storage") and (
+            getattr(schema, "load_from_storage", True) if not ignore_sample_from_load_attribute else True
         )
 
 
@@ -177,7 +177,7 @@ class Schema(dict):
         # self, *args = args
         super(Schema, self).__init__(*args, **kwargs)
         self._required_unpack_column: dict[str, bool] = {
-            k: require_unpacking(v) for k, v in self.items()
+            k: require_loading(v) for k, v in self.items()
         }
         assert hasattr(self, "_required_unpack_column")
 

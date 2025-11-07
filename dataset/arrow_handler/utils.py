@@ -14,10 +14,15 @@
 
 # Lint as: python3
 
-from functools import partial
-from typing import Union
+from functools import partial, wraps
+from typing import Union, Callable, TYPE_CHECKING
 import sys
 import hashlib
+if TYPE_CHECKING:
+    from CLTrainingFramework.dataset.arrow_handler.arrow_dataset.arrow_dataset import Dataset
+
+from CLTrainingFramework.dataset.arrow_utils import wrap_for_chunked_arrays
+
 # 从 Python 3.9 版本开始，hashlib 库开始感知系统的 FIPS 模式。如果系统开启了 FIPS，直接调用 hashlib.md5() 或 hashlib.sha1()，Python 会认为你可能在进行不安全的操作，于是会主动抛出一个 ValueError 异常
 # 这个又不是用来存密码的，直接insecure hash就完事了
 _kwargs = {"usedforsecurity": False} if sys.version_info >= (3, 9) else {}
@@ -90,3 +95,4 @@ class KeyHasher:
         md5.update(byte_key)
         # Convert to integer with hexadecimal conversion
         return int(md5.hexdigest(), 16)
+

@@ -103,3 +103,6 @@ def update_metadata_with_schema(table: Table, features: Schema):
         pa_metadata = {"CLTrainingFramework": json.dumps(metadata)}
     table = table.replace_schema_metadata(pa_metadata)
     return table
+
+#----fingerprint helper------
+

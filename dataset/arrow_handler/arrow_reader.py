@@ -194,11 +194,11 @@ class BaseReader:
             disable=len(files) <= 16 or None,
         )
         pa_tables = [t for t in pa_tables if len(t) > 0]
-        if not pa_tables and (self._info is None or self._info.features is None):
+        if not pa_tables and (self._info is None or self._info.schema is None):
             raise ValueError(
                 "Tried to read an empty table. Please specify at least info.features to create an empty table with the right type."
             )
-        pa_tables = pa_tables or [MemoryTable.from_batches([], schema=pa.schema(self._info.features.type))]
+        pa_tables = pa_tables or [MemoryTable.from_batches([], schema=pa.schema(self._info.schema.type))]
         pa_table = concat_tables(pa_tables) if len(pa_tables) != 1 else pa_tables[0]
         return pa_table
 

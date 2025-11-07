@@ -8,6 +8,7 @@ from CLTrainingFramework.dataset.arrow_utils.arrow_array_type import (
     Array4DExtensionType,
     Array5DExtensionType,
     _ArrayXDExtensionType,
+    pandas_types_mapper
 )
 from CLTrainingFramework.dataset.arrow_utils.arrow_helper import (
     arrow_type_to_framework_string_dtype,
@@ -50,4 +51,5 @@ __all__ = [
     "numpy_to_pyarrow_list_array",
     "to_pyarrow_list_array",
     "embed_local_file_to_cache",
+    "pandas_types_mapper",
 ]

@@ -1,5 +1,5 @@
 import re
-from functools import partial, reduce
+from functools import partial, reduce, wraps
 from operator import mul
 from typing import Union, Any, Optional, TYPE_CHECKING
 
@@ -276,7 +276,7 @@ def _is_zero_copy_only(pa_type: pa.DataType, unnest: bool = False) -> bool:
 
 def wrap_for_chunked_arrays(func):
     """Apply the function on each chunk of a `pyarrow.ChunkedArray`, or on the array directly"""
-
+    @wraps(func)
     def wrapper(array, *args, **kwargs):
         if isinstance(array, pa.ChunkedArray):
             return pa.chunked_array(

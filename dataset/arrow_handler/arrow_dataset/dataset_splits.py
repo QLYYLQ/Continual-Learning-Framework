@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass
 from typing import Optional, Union
 
-from reference.datasets.arrow_reader import make_file_instructions, FileInstructions
+from CLTrainingFramework.dataset.arrow_handler.arrow_reader import make_file_instructions, FileInstructions
 from CLTrainingFramework.dataset.utils.py_utils_mine import NonMutableDict, as_dict
 from CLTrainingFramework.utils.naming import _split_re
 

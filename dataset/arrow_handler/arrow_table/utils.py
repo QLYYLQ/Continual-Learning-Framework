@@ -1,7 +1,7 @@
 import copy
 from functools import partial
 from itertools import groupby
-from typing import Any, Union, TYPE_CHECKING, Optional
+from typing import Any, Union, TYPE_CHECKING, Optional, Iterable, Callable
 
 import numpy as np
 import pyarrow as pa
@@ -9,8 +9,9 @@ from pyarrow import compute as pc
 
 if TYPE_CHECKING:
     from CLTrainingFramework.dataset.schema import SchemaType
-    from CLTrainingFramework.dataset.arrow_handler.arrow_table import BlockTable, MemoryTable
+    from CLTrainingFramework.dataset.arrow_handler.arrow_table.block_table import BlockTable, MemoryTable,Table
     from CLTrainingFramework.dataset.arrow_handler.arrow_table.table import _T_Table
+
 
 from CLTrainingFramework.dataset.arrow_handler.arrow_table.error import CastError
 from CLTrainingFramework.dataset.arrow_utils import storage_type, short_str, wrap_for_chunked_arrays, \
@@ -338,3 +339,65 @@ def merge_specific_table_type_from_blocks(table_type: type(MemoryTable), blocks:
                                                                    row_block], axis=0
                                                                   )
     return merged_blocks
+
+def table_iter(table:Table,batch_size:int,drop_last_batch:bool=False)->Iterable[pa.Table]:
+    """
+    Args:
+        table:
+            table to iterate over
+        batch_size:
+            size of each sub-table to yield
+        drop_last_batch:
+            drop the last batch if it is smaller than batch_size
+    """
+    chunks_buffer = [
+    ]
+    chunks_buffer_size=0
+    for chunk in table.to_reader(max_chunk_size=batch_size):
+        if len(chunk==0):
+            continue
+        elif chunks_buffer_size+len(chunk)<batch_size:
+            chunks_buffer.append(chunk)
+            chunks_buffer_size+=len(chunk)
+            continue
+        elif chunks_buffer_size+len(chunk)==batch_size:
+            chunks_buffer.append(chunk)
+            yield pa.Table.from_batches(chunks_buffer)
+            chunks_buffer=[]
+            chunks_buffer_size=0
+        elif chunks_buffer_size+len(chunk)>batch_size:
+            cropped_chunk_length = batch_size-chunks_buffer_size
+            chunks_buffer.append(chunk.slice(0,cropped_chunk_length))
+            yield pa.Table.from_batches(chunks_buffer)
+            # 这里是对的，不用担心，api文档里的slice就是这么写的
+            chunks_buffer=[chunk.slice(cropped_chunk_length,len(chunk)-cropped_chunk_length)]
+            chunks_buffer_size=len(chunk)-cropped_chunk_length
+    if not drop_last_batch and chunks_buffer:
+        yield pa.Table.from_batches(chunks_buffer)
+
+def map_function_to_table(table:pa.Table,function:Callable[[pa.Array],None]):
+    from CLTrainingFramework.dataset.schema import Schema,Sequence
+    schema = Schema.from_arrow_schema(table.schema)
+    def _visit(array,schema:"SchemaType"):
+        if isinstance(array,pa.ChunkedArray):
+            for chunk in array.chunks:
+                _visit(chunk,schema)
+        else:
+            if isinstance(array,pa.ExtensionArray):
+                array = array.storage
+            function(array,schema)
+            if pa.types.is_struct(array.type) and not hasattr(schema,"prepare_for_pa_cache"):
+                if isinstance(schema,Sequence) and isinstance(schema.schema,dict):
+                    schema={
+                        k:Sequence(v,length=schema.length)
+                        for k,v in schema.schema.items()
+                    }
+                    for k,v in schema.items():
+                        _visit(array.field(k),v)
+            elif pa.types.is_list(array.type):
+                if isinstance(schema,list):
+                    _visit(array.values,schema[0])
+                elif isinstance(schema,Sequence):
+                    _visit(array.values,schema.schema)
+    for k,v in schema.items():
+        _visit(table[k],v)

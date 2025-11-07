@@ -175,6 +175,9 @@ class BlockTable(Table):
     pass
 
 
+MemoryMappedTable_Replay = tuple[str, tuple, dict]
+
+
 class MemoryTable(BlockTable):
     @classmethod
     def from_storage(cls, filename: str):
@@ -250,20 +253,11 @@ class MemoryTable(BlockTable):
         return MemoryTable(self.table.select(*args, **kwargs))
 
 
-MemoryMappedTable_Replay = tuple[str, tuple, dict]
-
-
 class MemoryMappedTable(BlockTable):
     def __init__(self, table: pa.Table, path: str, replays: Optional[list[MemoryMappedTable_Replay]] = None):
         super().__init__(table)
         self.path = os.path.abspath(path)
         self.replays: list[MemoryMappedTable_Replay] = replays if replays is not None else []
-
-    @classmethod
-    def from_file(cls, file_name: str, replays=None):
-        table = _memory_mapped_arrow_table_from_file(file_name)
-        table = cls._apply_replays(table, replays)
-        return cls(table, file_name, replays)
 
     def __getstate__(self):
         return {"path": self.path, "replays": self.replays}
@@ -279,6 +273,12 @@ class MemoryMappedTable(BlockTable):
         replays = copy.deepcopy(self.replays)
         replays.append(replay)
         return replays
+
+    @classmethod
+    def from_file(cls, file_name: str, replays=None):
+        table = _memory_mapped_arrow_table_from_file(file_name)
+        table = cls._apply_replays(table, replays)
+        return cls(table, file_name, replays)
 
     def slice(self, offset=0, length=None):
         replay = ("slice", (offset, length), {})
