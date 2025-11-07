@@ -8,7 +8,7 @@ def filter_images(
     dataset: Sequence,
     labels: List,
     labels_old: List,
-    background_label: List = (0, 255),
+    background_label: set = (0),
     overlap: bool = True,
 ) -> List:
     """
