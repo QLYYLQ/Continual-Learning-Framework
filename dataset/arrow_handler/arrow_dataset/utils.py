@@ -19,6 +19,8 @@ from CLTrainingFramework.dataset.utils.py_utils_mine import as_dict
 
 if TYPE_CHECKING:
     from CLTrainingFramework.dataset.arrow_handler.arrow_dataset.arrow_dataset import Dataset
+
+
 def _check_table(table) -> Table:
     """We check the table type to make sure it's an instance of :class:`datasets.table.Table`"""
     if isinstance(table, pa.Table):
@@ -32,7 +34,8 @@ def _check_table(table) -> Table:
 
 
 # ------------------------ cache utils
-_NOT_CACHE_FILES: Optional["_TempCacheDir"] = None
+_USING_CACHE: bool = True
+_TEMP_DIR_FOR_CACHE: Optional["_TempCacheDir"] = None
 _DATASETS_WITH_TABLE_IN_TEMP_DIR: Optional[weakref.WeakSet] = None
 
 
@@ -67,17 +70,28 @@ class _TempCacheDir:
 
 
 def register_dataset_for_no_cache(dataset):
-    if _NOT_CACHE_FILES is None:
+    if _TEMP_DIR_FOR_CACHE is None:
         return
     global _DATASETS_WITH_TABLE_IN_TEMP_DIR
     if _DATASETS_WITH_TABLE_IN_TEMP_DIR is None:
         _DATASETS_WITH_TABLE_IN_TEMP_DIR = weakref.WeakSet()
     if any(
-            Path(_NOT_CACHE_FILES.name) in Path(i["filename"]).parents
+            Path(_TEMP_DIR_FOR_CACHE.name) in Path(i["filename"]).parents
             for i in dataset.cache_files
     ):
         _DATASETS_WITH_TABLE_IN_TEMP_DIR.add(dataset)
 
+
+def _using_cache():
+    global _USING_CACHE
+    return bool(_USING_CACHE)
+
+
+def get_temp_cache_dir():
+    global _TEMP_DIR_FOR_CACHE
+    if _TEMP_DIR_FOR_CACHE is None:
+        _TEMP_DIR_FOR_CACHE = _TempCacheDir()
+    return _TEMP_DIR_FOR_CACHE.name
 
 # -------------------------
 
@@ -106,7 +120,8 @@ def update_metadata_with_schema(table: Table, features: Schema):
     table = table.replace_schema_metadata(pa_metadata)
     return table
 
-#----fingerprint helper------
+
+# ----fingerprint helper------
 
 def transmit_format(func):
     """Wrapper for dataset transforms that recreate a new Dataset to transmit the format of the original dataset to the new dataset"""

@@ -11,6 +11,7 @@ from typing import Optional, Union, Callable, TypeVar, overload, Iterable, Itera
 import fsspec
 import numpy as np
 import pyarrow as pa
+from accelerate.commands.config.config_args import cache_dir
 from fsspec import url_to_fs
 
 import CLTrainingFramework.dataset.utils.dataset_config as dataset_config
@@ -21,7 +22,7 @@ from CLTrainingFramework.dataset.arrow_handler.arrow_dataset.index_enhancement.d
     IndexablePlugin
 from CLTrainingFramework.dataset.arrow_handler.arrow_dataset.splits import Split
 from CLTrainingFramework.dataset.arrow_handler.arrow_dataset.utils import _check_table, register_dataset_for_no_cache, \
-    _check_column_names, update_metadata_with_schema
+    _check_column_names, update_metadata_with_schema, _using_cache, get_temp_cache_dir
 from CLTrainingFramework.dataset.arrow_handler.arrow_dataset.utils import transmit_format
 from CLTrainingFramework.dataset.arrow_handler.arrow_reader import ArrowReader
 from CLTrainingFramework.dataset.arrow_handler.arrow_table import Table, MemoryTable, MemoryMappedTable
@@ -33,7 +34,7 @@ from CLTrainingFramework.dataset.formatting import get_formatter, format_table, 
     get_format_type_from_alias
 from CLTrainingFramework.dataset.schema import Schema, pyarrow_to_schema, Video, Image, SchemaType
 from CLTrainingFramework.dataset.schema.Schema import require_loading
-from CLTrainingFramework.dataset.utils.fingerprint import fingerprint_transform
+from CLTrainingFramework.dataset.utils.fingerprint import fingerprint_transform, generate_random_fingerprint
 from CLTrainingFramework.dataset.utils.py_utils_mine import convert_file_size_to_int, as_dict
 from CLTrainingFramework.utils.logging import get_logger
 
@@ -326,6 +327,16 @@ class Dataset(DatasetInfoPlugin, IndexablePlugin):
             indices_table=indices_table,
             fingerprint=fingerprint,
         )
+
+    def _get_cache_file(self, fingerprint: str) -> str:
+        if _using_cache():
+            cache_file_name = "arrow-" + fingerprint + ".arrow"
+            _cache_dir = os.path.dirname(self.cache_files[0]["filename"])
+        else:
+            cache_file_name = "arrow-" + generate_random_fingerprint() + ".arrow"
+            _cache_dir = get_temp_cache_dir()
+        full_path = os.path.join(_cache_dir, cache_file_name)
+        return full_path
 
     @property
     def schema(self) -> Schema:
@@ -636,14 +647,31 @@ class Dataset(DatasetInfoPlugin, IndexablePlugin):
         return self._select_with_indices_mapping(
             indices, keep_in_memory, indices_cache_file_name, writer_batch_size, new_fingerprint
         )
-    def clean_cache(self):
+
+    @transmit_format
+    def map(self, function: Optional[Callable] = None, with_indices: bool = False, with_rank: bool = False,
+            input_columns: Optional[Union[str, list[str]]] = None, batched: bool = False,
+            batch_size: Optional[int] = 1000, drop_last_batch: bool = False,
+            remove_columns: Optional[Union[str, list[str]]] = None, keep_in_memory: bool = False,
+            load_from_cache_file: Optional[bool] = None, cache_file_name: Optional[str] = None,
+            writer_batch_size: Optional[int] = 1000, schema: Optional[Schema] = None,
+            disable_nullable: bool = False, fn_kwargs: Optional[dict] = None, num_proc: Optional[int] = None,
+            suffix_template: str = "_{rank:05d}_of_{num_proc:05d}", new_fingerprint: Optional[str] = None,
+            desc: Optional[str] = None, try_original_type: Optional[bool] = True,
+            )->"Dataset":
+        raise NotImplementedError
+    def clean_cache(self) -> int:
         current_cache = [os.path.abspath(i["filename"]) for i in self.cache_files]
         if not current_cache:
-            return
+            return 0
         cache_directory = os.path.dirname(current_cache[0])
         logger.info(f"Cache file in:{cache_directory}")
-        files:list[str] = os.listdir(cache_directory)
-        removed_files:list[str] = []
+        files: list[str] = os.listdir(cache_directory)
+        remove_count = 0
         for i in files:
-
-
+            full_path = os.path.abspath(os.path.join(cache_directory, i))
+            if i.startswith("cache-") and i.endswith(".arrow"):
+                logger.info(f"Removing cache file:{full_path}")
+                os.remove(full_path)
+                remove_count += 1
+        return remove_count
