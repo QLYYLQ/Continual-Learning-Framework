@@ -29,7 +29,8 @@ from CLTrainingFramework.dataset.arrow_handler.arrow_table.table import table_ca
 from CLTrainingFramework.dataset.arrow_handler.arrow_table.utils import cast_pa_array_using_schema
 from CLTrainingFramework.dataset.arrow_handler.arrow_table.utils import table_iter, map_function_to_table
 from CLTrainingFramework.dataset.arrow_handler.arrow_writer import OptimizedTypedSequence, ArrowWriter
-from CLTrainingFramework.dataset.formatting import get_formatter, format_table, query_table, is_range_contiguous
+from CLTrainingFramework.dataset.formatting import get_formatter, format_table, query_table, is_range_contiguous, \
+    get_format_type_from_alias
 from CLTrainingFramework.dataset.schema import Schema, pyarrow_to_schema, Video, Image, SchemaType
 from CLTrainingFramework.dataset.schema.Schema import require_loading
 from CLTrainingFramework.dataset.utils.fingerprint import fingerprint_transform
@@ -354,6 +355,15 @@ class Dataset(DatasetInfoPlugin, IndexablePlugin):
     def column_names(self) -> list[str]:
         return self._data.column_names
 
+    @property
+    def format(self):
+        return {
+            "type": self._format_type,
+            "format_kwargs": self._format_kwargs,
+            "columns": self.column_names if self._format_columns is None else self._format_columns,
+            "output_all_columns": self._output_all_columns,
+        }
+
     @classmethod
     def from_file(
             cls,
@@ -555,9 +565,44 @@ class Dataset(DatasetInfoPlugin, IndexablePlugin):
         dataset.set_format(type=type, columns=columns, output_all_columns=output_all_columns, **kwargs)
         return dataset
 
+    def with_transform(self, transform: Optional[Callable], columns: Optional[list] = None,
+                       output_all_columns: bool = False) -> "Dataset":
+        dataset = copy.deepcopy(self)
+        dataset.set_transform(transform=transform, columns=columns, output_all_columns=output_all_columns)
+        return dataset
+
     @fingerprint_transform(inplace=True)
-    def set_format(self, type, columns, output_all_columns, **kwargs):
-        pass
+    def set_format(self, type: Optional[str] = None, columns: Optional[list] = None, output_all_columns: bool = False,
+                   **kwargs):
+        kwargs.update(kwargs.pop("format_kwargs", {}))
+        type = get_format_type_from_alias(type)
+        # 这里不需要返回值，只是做过检查，type和其他能否匹配
+        get_formatter(type, schema=self._info.schema, **kwargs)
+        if isinstance(columns, str):
+            columns = [columns]
+        elif isinstance(columns, tuple):
+            columns = list(columns)
+        if columns is not None:
+            missing_columns = set(columns) - set(self._data.column_names)
+            if missing_columns:
+                raise ValueError(
+                    f"Columns {list(missing_columns)} not in the dataset, current columns is:{self._data.column_names}\nyour columns is:{columns}"
+                )
+            columns = columns.copy()  # 别搞点幺蛾子出来
+        self._format_type = type
+        self._format_kwargs = kwargs
+        self._format_columns = columns
+        self._output_all_columns = output_all_columns
+        logger.debug(
+            f"Set __getitem__ output type to \n{type}\n for columns \n{columns}\n"
+        )
+
+    def reset_format(self):
+        self.set_format()
+
+    def set_transform(self, transform: Optional[Callable], columns: Optional[list] = None,
+                      output_all_columns: bool = False):
+        self.set_format("custom", columns=columns, output_all_columns=output_all_columns, transform=transform)
 
     @transmit_format
     @fingerprint_transform(inplace=False, ignore_kwargs=["indices_cache_file_name"])
@@ -582,12 +627,23 @@ class Dataset(DatasetInfoPlugin, IndexablePlugin):
             try:
                 start = next(iter(indices))
             except StopIteration as e:
-                return self._select_contiguous(0,0,new_fingerprint=new_fingerprint)
-            if start>=0:
+                return self._select_contiguous(0, 0, new_fingerprint=new_fingerprint)
+            if start >= 0:
                 counter_from_start = itertools.count(start=start)
-                if all(i==j for i,j in zip(indices, counter_from_start)):
-                    length = next(counter_from_start)-start
+                if all(i == j for i, j in zip(indices, counter_from_start)):
+                    length = next(counter_from_start) - start
                     return self._select_contiguous(start, length, new_fingerprint)
         return self._select_with_indices_mapping(
             indices, keep_in_memory, indices_cache_file_name, writer_batch_size, new_fingerprint
         )
+    def clean_cache(self):
+        current_cache = [os.path.abspath(i["filename"]) for i in self.cache_files]
+        if not current_cache:
+            return
+        cache_directory = os.path.dirname(current_cache[0])
+        logger.info(f"Cache file in:{cache_directory}")
+        files:list[str] = os.listdir(cache_directory)
+        removed_files:list[str] = []
+        for i in files:
+
+
