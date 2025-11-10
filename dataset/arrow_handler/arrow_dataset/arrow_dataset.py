@@ -4,15 +4,17 @@ import json
 import os.path
 import shutil
 import tempfile
+from multiprocessing import Pool
 from os import PathLike
 from pathlib import Path
-from typing import Optional, Union, Callable, TypeVar, overload, Iterable, Iterator
+from typing import Optional, Union, Callable, TypeVar, overload, Iterable, Iterator, Literal
 
 import fsspec
 import numpy as np
 import pyarrow as pa
 from accelerate.commands.config.config_args import cache_dir
 from fsspec import url_to_fs
+from scipy.io.arff.tests.test_arffread import missing
 
 import CLTrainingFramework.dataset.utils.dataset_config as dataset_config
 from CLTrainingFramework.dataset.arrow_handler.arrow_dataset.dataset_plugin import DatasetInfoPlugin, DatasetInfo, \
@@ -34,10 +36,11 @@ from CLTrainingFramework.dataset.formatting import get_formatter, format_table, 
     get_format_type_from_alias
 from CLTrainingFramework.dataset.schema import Schema, pyarrow_to_schema, Video, Image, SchemaType
 from CLTrainingFramework.dataset.schema.Schema import require_loading
-from CLTrainingFramework.dataset.utils.fingerprint import fingerprint_transform, generate_random_fingerprint
+from CLTrainingFramework.dataset.utils.fingerprint import fingerprint_transform, generate_random_fingerprint, \
+    format_transform_for_fingerprint, format_kwargs_for_fingerprint, update_fingerprint, validate_fingerprint
 from CLTrainingFramework.dataset.utils.py_utils_mine import convert_file_size_to_int, as_dict
 from CLTrainingFramework.utils.logging import get_logger
-
+from CLTrainingFramework.utils.global_tqdm import tqdm
 logger = get_logger(__name__)
 _T = TypeVar("_T")
 
@@ -337,6 +340,30 @@ class Dataset(DatasetInfoPlugin, IndexablePlugin):
             _cache_dir = get_temp_cache_dir()
         full_path = os.path.join(_cache_dir, cache_file_name)
         return full_path
+
+    @staticmethod
+    def _map_single(
+            shard: "Dataset",
+            function: Optional[Callable] = None,
+            with_indices: bool = False,
+            with_rank: bool = False,
+            input_columns: Optional[list[str]] = None,
+            batched: bool = False,
+            batch_size: Optional[int] = 1000,
+            drop_last_batch: bool = False,
+            remove_columns: Optional[list[str]] = None,
+            keep_in_memory: bool = False,
+            cache_file_name: Optional[str] = None,
+            writer_batch_size: Optional[int] = 1000,
+            schema: Optional[Schema] = None,
+            disable_nullable: bool = False,
+            fn_kwargs: Optional[dict] = None,
+            new_fingerprint: Optional[str] = None,
+            rank: Optional[int] = None,
+            offset: int = 0,
+            try_original_type: Optional[bool] = True,
+    ) -> Iterable[tuple[int, bool, Union[int, "Dataset"]]]:
+        raise NotImplementedError
 
     @property
     def schema(self) -> Schema:
@@ -658,8 +685,241 @@ class Dataset(DatasetInfoPlugin, IndexablePlugin):
             disable_nullable: bool = False, fn_kwargs: Optional[dict] = None, num_proc: Optional[int] = None,
             suffix_template: str = "_{rank:05d}_of_{num_proc:05d}", new_fingerprint: Optional[str] = None,
             desc: Optional[str] = None, try_original_type: Optional[bool] = True,
-            )->"Dataset":
-        raise NotImplementedError
+            ) -> "Dataset":
+        if keep_in_memory and cache_file_name is not None:
+            raise ValueError("not both keep in memory or indices cache file name")
+        if num_proc is not None and num_proc <= 0:
+            raise ValueError("num_proc must be greater than 0")
+        if len(self) == 0:
+            if self._indices is not None:
+                self = Dataset(self.data.slice(0, 0),
+                               info=self.info.copy(),
+                               split=self.split, fingerprint=new_fingerprint)
+            if remove_columns is not None:
+                return self.remove_columns(remove_columns)
+            else:
+                return self
+        if function is None:
+            function = lambda x: x
+        if isinstance(input_columns, str):
+            input_columns = [input_columns]
+        if input_columns is not None:
+            missing_columns = set(input_columns) - set(self._data.column_names)
+            if missing_columns:
+                raise ValueError(
+                    f"{missing_columns} not in the dataset.\ndataset has columns: {self._data.column_names}")
+        load_from_cache_file = load_from_cache_file if load_from_cache_file is not None else _using_cache()
+        if fn_kwargs is None:
+            fn_kwargs = {}
+        if num_proc is not None and num_proc > len(self):
+            num_proc = len(self)
+            logger.warning(
+                f"num_proc={num_proc} > len(self)={len(self)}, reset num_proc to the dataset size: {len(self)}")
+
+        dataset_kwargs = {
+            "shard": self,
+            "function": function,
+            "with_indices": with_indices,
+            "with_rank": with_rank,
+            "input_columns": input_columns,
+            "batched": batched,
+            "batch_size": batch_size,
+            "drop_last_batch": drop_last_batch,
+            "remove_columns": remove_columns,
+            "keep_in_memory": keep_in_memory,
+            "writer_batch_size": writer_batch_size,
+            "schema": schema,
+            "disable_nullable": disable_nullable,
+            "fn_kwargs": fn_kwargs,
+            "try_original_type": try_original_type,
+        }
+
+        if new_fingerprint is None:
+            # we create a unique hash from the function,
+            # current dataset file and the mapping args
+            transform = format_transform_for_fingerprint(Dataset._map_single)
+            kwargs_for_fingerprint = format_kwargs_for_fingerprint(Dataset._map_single, (), dataset_kwargs)
+            kwargs_for_fingerprint["fingerprint_name"] = "new_fingerprint"
+            new_fingerprint = update_fingerprint(self._fingerprint, transform, kwargs_for_fingerprint)
+        else:
+            validate_fingerprint(new_fingerprint)
+        dataset_kwargs["new_fingerprint"] = new_fingerprint
+
+        if self.cache_files:
+            if cache_file_name is None:
+                cache_file_name = self._get_cache_file(new_fingerprint)
+        dataset_kwargs["cache_file_name"] = cache_file_name
+
+        def load_processed_shard_from_cache(shard_kwargs):
+            """Load a processed shard from cache if it exists, otherwise throw an error."""
+            shard = shard_kwargs["shard"]
+            # Check if we've already cached this computation (indexed by a hash)
+            if shard_kwargs["cache_file_name"] is not None:
+                if os.path.exists(shard_kwargs["cache_file_name"]) and load_from_cache_file:
+                    info = shard.info.copy()
+                    info.schema = schema
+                    return Dataset.from_file(shard_kwargs["cache_file_name"], info=info, split=shard.split)
+            raise RuntimeError("Not such dataset")
+
+        num_shards = num_proc if num_proc is not None else 1
+        if batched and drop_last_batch:
+            pbar_total = len(self) // num_shards // batch_size * num_shards * batch_size
+        else:
+            pbar_total = len(self)
+
+        shards_done = 0
+        if num_proc is None or num_proc == 1:
+            transformed_dataset = None
+            try:
+                transformed_dataset = load_processed_shard_from_cache(dataset_kwargs)
+                logger.info(f"Loading cached processed dataset at {dataset_kwargs['cache_file_name']}")
+            except RuntimeError:
+                pass
+            if transformed_dataset is None:
+                with tqdm(unit=" examples", total=pbar_total,desc=desc or "CLTrainingFramework.dataset.Dataset.map") as pbar:
+                    for rank, done, content in Dataset._map_single(**dataset_kwargs):
+                        if done:
+                            shards_done += 1
+                            logger.debug(f"Finished processing shard number {rank} of {num_shards}.")
+                            transformed_dataset = content
+                        else:
+                            pbar.update(content)
+            assert transformed_dataset is not None, "Failed to retrieve the result from map"
+            # update fingerprint if the dataset changed
+            if transformed_dataset._fingerprint != self._fingerprint:
+                transformed_dataset._fingerprint = new_fingerprint
+            return transformed_dataset
+        else:
+
+            def format_cache_file_name(
+                    cache_file_name: Optional[str],
+                    rank: Union[int, Literal["*"]],  # noqa: F722
+            ) -> Optional[str]:
+                if not cache_file_name:
+                    return cache_file_name
+                sep = cache_file_name.rindex(".")
+                base_name, extension = cache_file_name[:sep], cache_file_name[sep:]
+                if isinstance(rank, int):
+                    cache_file_name = base_name + suffix_template.format(rank=rank, num_proc=num_proc) + extension
+                    logger.info(f"Process #{rank} will write at {cache_file_name}")
+                else:
+                    cache_file_name = (
+                            base_name
+                            + suffix_template.replace("{rank:05d}", "{rank}").format(rank=rank, num_proc=num_proc)
+                            + extension
+                    )
+                return cache_file_name
+
+            def format_new_fingerprint(new_fingerprint: str, rank: int) -> str:
+                new_fingerprint = new_fingerprint + suffix_template.format(rank=rank, num_proc=num_proc)
+                validate_fingerprint(new_fingerprint)
+                return new_fingerprint
+
+            prev_env = copy.deepcopy(os.environ)
+            # check if parallelism if off
+            # from https://github.com/huggingface/tokenizers/blob/bb668bc439dc34389b71dbb8ce0c597f15707b53/tokenizers/src/utils/parallelism.rs#L22
+            if prev_env.get("TOKENIZERS_PARALLELISM", "false").lower() not in (
+                    "",
+                    "off",
+                    "false",
+                    "f",
+                    "no",
+                    "n",
+                    "0",
+            ):
+                logger.warning("Setting TOKENIZERS_PARALLELISM=false for forked processes.")
+            os.environ["TOKENIZERS_PARALLELISM"] = "false"
+            shards = [
+                self.shard(num_shards=num_proc, index=rank, contiguous=True, keep_in_memory=keep_in_memory)
+                for rank in range(num_proc)
+            ]
+            kwargs_per_job = [
+                {
+                    **dataset_kwargs,
+                    "shard": shards[rank],
+                    "cache_file_name": format_cache_file_name(cache_file_name, rank),
+                    "rank": rank,
+                    "offset": sum(len(s) for s in shards[:rank]),
+                    "new_fingerprint": format_new_fingerprint(new_fingerprint, rank),
+                }
+                for rank in range(num_shards)
+            ]
+
+            transformed_shards = [None] * num_shards
+            for i in range(num_shards):
+                try:
+                    transformed_shards[i] = load_processed_shard_from_cache(kwargs_per_job[rank])
+                    kwargs_per_job[i] = None
+                except RuntimeError :
+                    pass
+
+            kwargs_per_job = [kwargs for kwargs in kwargs_per_job if kwargs is not None]
+
+            # We try to create a pool with as many workers as dataset not yet cached.
+            if kwargs_per_job:
+                if len(kwargs_per_job) < num_shards:
+                    logger.info(
+                        f"Reprocessing {len(kwargs_per_job)}/{num_shards} shards because some of them were missing from the cache."
+                    )
+                with Pool(len(kwargs_per_job)) as pool:
+                    os.environ = prev_env
+                    logger.info(f"Spawning {num_proc} processes")
+                    with tqdm(
+                            unit=" examples",
+                            total=pbar_total,
+                            desc=(desc or "CLTrainingFramework.dataset.Dataset.Map") + f" (num_proc={num_proc})",
+                    ) as pbar:
+                        for rank, done, content in iflatmap_unordered(
+                                pool, Dataset._map_single, kwargs_iterable=kwargs_per_job
+                        ):
+                            if done:
+                                shards_done += 1
+                                logger.debug(f"Finished processing shard number {rank} of {num_shards}.")
+                                transformed_shards[rank] = content
+                            else:
+                                pbar.update(content)
+                    pool.close()
+                    pool.join()
+                # Avoids PermissionError on Windows (the error: https://github.com/huggingface/datasets/actions/runs/4026734820/jobs/6921621805)
+                for kwargs in kwargs_per_job:
+                    del kwargs["shard"]
+            else:
+                logger.info(f"Loading cached processed dataset at {format_cache_file_name(cache_file_name, '*')}")
+            if None in transformed_shards:
+                raise ValueError(
+                    f"Failed to retrieve results from map: result list {transformed_shards} still contains None - at "
+                    "least one worker failed to return its results"
+                )
+            logger.info(f"Concatenating {num_proc} shards")
+            result = _concatenate_map_style_datasets(transformed_shards)
+            # update fingerprint if the dataset changed
+            if any(
+                    transformed_shard._fingerprint != shard._fingerprint
+                    for transformed_shard, shard in zip(transformed_shards, shards)
+            ):
+                result._fingerprint = new_fingerprint
+            else:
+                result._fingerprint = self._fingerprint
+            return result
+
+    @transmit_format
+    @fingerprint_transform(inplace=False)
+    def remove_columns(self, column_names: Union[str, list[str]], new_fingerprint: Optional[str] = None) -> "Dataset":
+        dataset = copy.deepcopy(self)
+        if isinstance(column_names, str):
+            column_names = [column_names]
+        missing_column = set(column_names) - set(self._data.column_names)
+        if missing_column:
+            raise ValueError(
+                f"{missing_column} not in the dataset.\ndataset has columns: {self._data.column_names}"
+            )
+        for column in column_names:
+            del dataset._info.schema[column]
+        dataset._data = dataset._data.drop(column_names)
+        dataset._data = update_metadata_with_schema(dataset._data, dataset.schema)
+        dataset._fingerprint = new_fingerprint
+        return dataset
+
     def clean_cache(self) -> int:
         current_cache = [os.path.abspath(i["filename"]) for i in self.cache_files]
         if not current_cache:
