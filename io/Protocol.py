@@ -154,7 +154,7 @@ class _T_IOClass(
 _MetaRegistry: Dict[str, _T_MetaIO] = dict()
 
 
-_StrOrBytesPath = Union[str, bytes, PathLike[str], PathLike[bytes], IO[bytes]]
+_StrOrBytesPath = Union[str, bytes, PathLike[str], IO[bytes]]
 
 if __name__ == "__main__":
     register_dict = RegisterDict()

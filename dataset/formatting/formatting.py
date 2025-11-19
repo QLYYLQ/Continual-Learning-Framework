@@ -221,13 +221,13 @@ class PythonFeaturesDecoder:
         self.token_per_repo_id = token_per_repo_id
 
     def load_from_storage_with_row(self, row: dict) -> dict:
-        return self.schema.sample_from_storage(row, token_per_repo_id=self.token_per_repo_id) if self.schema else row
+        return self.schema.sample_from_storage(row, token_pre_repo_id=self.token_per_repo_id) if self.schema else row
 
     def load_from_storage_with_column(self, column: list, column_name: str) -> list:
-        return self.schema.column_from_storage(column, column_name) if self.features else column
+        return self.schema.column_from_storage(column, column_name) if self.schema else column
 
     def load_from_storage_with_batch(self, batch: dict) -> dict:
-        return self.schema.batch_from_storage(batch) if self.features else batch
+        return self.schema.batch_from_storage(batch) if self.schema else batch
 
 
 class PandasFeaturesDecoder:
@@ -251,7 +251,7 @@ class PandasFeaturesDecoder:
     def decode_column(self, column: pd.Series, column_name: str) -> pd.Series:
         decode = (
             no_op_if_value_is_null(partial(load_from_storage_with_nested_sample, self.schema[column_name]))
-            if self.schema and column_name in self.schema and self.schema._column_requires_decoding[column_name]
+            if self.schema and column_name in self.schema and self.schema._required_unpack_column[column_name]
             else None
         )
         if decode:

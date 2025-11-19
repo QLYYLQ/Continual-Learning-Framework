@@ -4,7 +4,6 @@ import json
 import os.path
 import shutil
 import tempfile
-from multiprocessing import Pool
 from os import PathLike
 from pathlib import Path
 from typing import Optional, Union, Callable, TypeVar, overload, Iterable, Iterator, Literal
@@ -12,9 +11,8 @@ from typing import Optional, Union, Callable, TypeVar, overload, Iterable, Itera
 import fsspec
 import numpy as np
 import pyarrow as pa
-from accelerate.commands.config.config_args import cache_dir
 from fsspec import url_to_fs
-from scipy.io.arff.tests.test_arffread import missing
+from multiprocess import Pool
 
 import CLTrainingFramework.dataset.utils.dataset_config as dataset_config
 from CLTrainingFramework.dataset.arrow_handler.arrow_dataset.dataset_plugin import DatasetInfoPlugin, DatasetInfo, \
@@ -38,9 +36,11 @@ from CLTrainingFramework.dataset.schema import Schema, pyarrow_to_schema, Video,
 from CLTrainingFramework.dataset.schema.Schema import require_loading
 from CLTrainingFramework.dataset.utils.fingerprint import fingerprint_transform, generate_random_fingerprint, \
     format_transform_for_fingerprint, format_kwargs_for_fingerprint, update_fingerprint, validate_fingerprint
-from CLTrainingFramework.dataset.utils.py_utils_mine import convert_file_size_to_int, as_dict
-from CLTrainingFramework.utils.logging import get_logger
+from CLTrainingFramework.dataset.utils.py_utils_mine import convert_file_size_to_int, as_dict, \
+    parallel_flatmap_unordered
 from CLTrainingFramework.utils.global_tqdm import tqdm
+from CLTrainingFramework.utils.logging import get_logger
+
 logger = get_logger(__name__)
 _T = TypeVar("_T")
 
@@ -816,7 +816,7 @@ class Dataset(DatasetInfoPlugin, IndexablePlugin):
                 return new_fingerprint
 
             prev_env = copy.deepcopy(os.environ)
-            # check if parallelism if off
+            # check if parallelism is off
             # from https://github.com/huggingface/tokenizers/blob/bb668bc439dc34389b71dbb8ce0c597f15707b53/tokenizers/src/utils/parallelism.rs#L22
             if prev_env.get("TOKENIZERS_PARALLELISM", "false").lower() not in (
                     "",
@@ -848,7 +848,7 @@ class Dataset(DatasetInfoPlugin, IndexablePlugin):
             transformed_shards = [None] * num_shards
             for i in range(num_shards):
                 try:
-                    transformed_shards[i] = load_processed_shard_from_cache(kwargs_per_job[rank])
+                    transformed_shards[i] = load_processed_shard_from_cache(kwargs_per_job[i])
                     kwargs_per_job[i] = None
                 except RuntimeError :
                     pass
@@ -869,8 +869,8 @@ class Dataset(DatasetInfoPlugin, IndexablePlugin):
                             total=pbar_total,
                             desc=(desc or "CLTrainingFramework.dataset.Dataset.Map") + f" (num_proc={num_proc})",
                     ) as pbar:
-                        for rank, done, content in iflatmap_unordered(
-                                pool, Dataset._map_single, kwargs_iterable=kwargs_per_job
+                        for rank, done, content in parallel_flatmap_unordered(
+                                pool, Dataset._map_single, iterable_kwargs=kwargs_per_job
                         ):
                             if done:
                                 shards_done += 1

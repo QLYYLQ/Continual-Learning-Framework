@@ -1,17 +1,18 @@
 import copy
 import itertools
+import multiprocessing.pool
 import warnings
+import queue
 from dataclasses import is_dataclass, fields
 from typing import Union, Callable, Any, Optional, TypeVar, Iterable
 
+import multiprocess.pool
 import numpy as np
 from tqdm.asyncio import tqdm
 
-from reference.datasets import tqdm as hf_tqdm
 from CLTrainingFramework.dataset.arrow_handler.parallel import parallel_map
 from CLTrainingFramework.utils import logging
-
-
+from reference.datasets import tqdm as hf_tqdm
 
 
 def _check_datclass_instance(obj):
@@ -168,10 +169,10 @@ def _single_map_nested(args):
         else:
             return function(data_struct)
     if (
-        batched
-        and not isinstance(data_struct, dict)
-        and isinstance(data_struct, types)
-        and all(not isinstance(v, (dict, types)) for v in data_struct)
+            batched
+            and not isinstance(data_struct, dict)
+            and isinstance(data_struct, types)
+            and all(not isinstance(v, (dict, types)) for v in data_struct)
     ):
         return [mapped_item for batch in iter_batched(data_struct, batch_size) for mapped_item in function(batch)]
 
@@ -202,19 +203,19 @@ def _single_map_nested(args):
 
 
 def map_nested(
-    function: Callable[[Any], Any],
-    data_struct: Any,
-    dict_only: bool = False,
-    map_list: bool = True,
-    map_tuple: bool = False,
-    map_numpy: bool = False,
-    num_proc: Optional[int] = None,
-    parallel_min_length: int = 2,
-    batched: bool = False,
-    batch_size: Optional[int] = 1000,
-    types: Optional[tuple] = None,
-    disable_tqdm: bool = True,
-    desc: Optional[str] = None,
+        function: Callable[[Any], Any],
+        data_struct: Any,
+        dict_only: bool = False,
+        map_list: bool = True,
+        map_tuple: bool = False,
+        map_numpy: bool = False,
+        num_proc: Optional[int] = None,
+        parallel_min_length: int = 2,
+        batched: bool = False,
+        batch_size: Optional[int] = 1000,
+        types: Optional[tuple] = None,
+        disable_tqdm: bool = True,
+        desc: Optional[str] = None,
 ) -> Any:
     """Apply a function recursively to each element of a nested data struct.
 
@@ -352,3 +353,42 @@ def iter_batched(iterable: Iterable[T], n: int) -> Iterable[list[T]]:
             batch = []
     if batch:
         yield batch
+
+
+# ------- parallel helper
+
+def _get_pid(pool: Union[multiprocessing.pool.Pool, multiprocess.pool.Pool], ) -> set[int]:
+    return {i.pid for i in pool._pool}
+
+
+def _generator_queue_helper(queue: queue.Queue, func:Callable[...,Iterable[T]],kwargs:dict):
+    for i, result in enumerate(func(**kwargs)):
+        queue.put(result)
+
+
+def parallel_flatmap_unordered(pool: Union[multiprocessing.pool.Pool, multiprocess.pool.Pool],
+                               func: Callable[..., Iterable[T]], *, iterable_kwargs: Iterable[dict]) -> Iterable[T]:
+    init_pid = _get_pid(pool)
+    _is_pool_pid_changed = False
+    manage_cls = multiprocessing.Manager if isinstance(pool, multiprocessing.pool.Pool) else multiprocess.Manger
+    with manage_cls() as manager:
+        queue = manager.Queue()
+        async_results = [
+            pool.apply_async(_generator_queue_helper,(queue,func,i) )
+            for i in iterable_kwargs
+        ]
+        try:
+            while True:
+                try:
+                    yield queue.get(timeout = 0.05)
+                except queue.Empty:
+                    if all(i.ready() for i in async_results) and queue.empty():
+                        break
+                if _get_pid(pool)!=init_pid:
+                    _is_pool_pid_changed = True
+                    raise RuntimeError(f"有subprocesses在map的时候死了，你可能需要停止使用multiprocessing")
+
+        finally:
+            if not _is_pool_pid_changed:
+                # we get the result in case there's an error to raise
+                [async_result.get(timeout=0.05) for async_result in async_results]
